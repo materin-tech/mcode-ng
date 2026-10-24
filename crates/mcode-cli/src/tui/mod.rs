@@ -450,7 +450,8 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
                     })
                 };
                 state.busy = true;
-                state.status = "思考中…".into();
+                state.status = "思考中".into();
+                state.turn_started = Some(std::time::Instant::now());
                 let line_index = state.lines.len();
                 state.push_line(LineKind::User, prompt.clone());
                 // checkpoint：TUI 自己 push 拿消息 id（此刻无回合持锁）

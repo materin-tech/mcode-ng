@@ -126,8 +126,10 @@ pub struct AppState {
     /// 已发送输入（↑ 回溯）。
     pub history: Vec<String>,
     pub history_pos: Option<usize>,
-    /// 状态栏文本（busy 时为活动描述）。
+    /// 状态栏文本（busy 时为活动描述：思考中/运行 bash/回复中）。
     pub status: String,
+    /// 当前回合起点（busy 态状态行计时/转圈用）。
+    pub turn_started: Option<std::time::Instant>,
     /// transcript 滚动偏移（None = 贴底自动滚动）。
     pub scroll_from_bottom: Option<u16>,
     pub should_quit: bool,
@@ -182,7 +184,10 @@ impl AppState {
     /// 回合事件 → transcript 行（Done 不产生行，由 run 循环收尾）。
     pub fn apply_event(&mut self, e: &AgentEvent) {
         match e {
-            AgentEvent::TextDelta(t) => self.append_assistant_text(t),
+            AgentEvent::TextDelta(t) => {
+                self.status = "回复中".into();
+                self.append_assistant_text(t);
+            }
             AgentEvent::ToolInputDelta { .. } => {
                 // 流式参数不进 transcript（工具开始/结果已覆盖可见性）
             }
@@ -194,7 +199,7 @@ impl AppState {
                         None => format!("→ {name}"),
                     },
                 );
-                self.status = format!("运行 {name}…");
+                self.status = format!("运行 {name}");
             }
             AgentEvent::ToolResult {
                 name,
@@ -219,8 +224,10 @@ impl AppState {
                     format!("{head}{preview}{ell}"),
                     format!("{head}\n{}", output.trim()),
                 );
+                self.status = "思考中".into();
             }
             AgentEvent::Thinking { text, scope } => {
+                self.status = "思考中".into();
                 self.append_thinking_text(text, scope.as_deref());
             }
             AgentEvent::Retrying {
@@ -413,6 +420,7 @@ impl AppState {
     pub fn finish_turn(&mut self) {
         self.busy = false;
         self.status.clear();
+        self.turn_started = None;
     }
 
     pub fn dequeue_next(&mut self) -> Option<String> {
@@ -906,6 +914,43 @@ mod tests {
         assert_eq!(picked, "docs/guide.md");
         assert_eq!(t.input, "看下 @docs/guide.md ");
         assert!(t.completion.is_none());
+    }
+
+    #[test]
+    fn status_tracks_activity_and_clears_on_finish() {
+        let mut s = AppState {
+            busy: true,
+            turn_started: Some(std::time::Instant::now()),
+            ..Default::default()
+        };
+
+        s.apply_event(&AgentEvent::Thinking {
+            text: "嗯".into(),
+            scope: None,
+        });
+        assert_eq!(s.status, "思考中");
+
+        s.apply_event(&AgentEvent::ToolUseStart {
+            id: "t1".into(),
+            name: "bash".into(),
+            scope: None,
+        });
+        assert_eq!(s.status, "运行 bash");
+
+        s.apply_event(&AgentEvent::ToolResult {
+            name: "bash".into(),
+            success: true,
+            output: "ok".into(),
+            scope: None,
+        });
+        assert_eq!(s.status, "思考中", "工具结束后回到思考态");
+
+        s.apply_event(&AgentEvent::TextDelta("回".into()));
+        assert_eq!(s.status, "回复中");
+
+        s.finish_turn();
+        assert_eq!(s.status, "");
+        assert!(s.turn_started.is_none(), "收尾清计时起点");
     }
 
     #[test]

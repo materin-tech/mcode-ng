@@ -78,18 +78,18 @@ fn scroll_down(state: &mut AppState, n: u16) {
     state.scroll_from_bottom = if next == 0 { None } else { Some(next) };
 }
 
-/// 整帧绘制。
+/// 整帧绘制。输入框永远钉在最底部（CC 式），状态/提示行贴其上方。
 pub fn draw(f: &mut Frame, state: &AppState) {
-    let [transcript, composer, status] = Layout::vertical([
-        Constraint::Min(5),
-        Constraint::Length(3),
+    let [transcript, status, composer] = Layout::vertical([
+        Constraint::Min(3),
         Constraint::Length(1),
+        Constraint::Length(3),
     ])
     .areas(f.area());
 
     draw_transcript(f, state, transcript);
-    draw_composer(f, state, composer);
     draw_statusline(f, state, status);
+    draw_composer(f, state, composer);
     if state.completion.is_some() {
         draw_completion(f, state, transcript);
     }
@@ -399,39 +399,81 @@ fn draw_statusline(f: &mut Frame, state: &AppState, area: Rect) {
         mcode_core::permission::Mode::Manual => Color::Yellow,
         mcode_core::permission::Mode::Plan => Color::Blue,
     };
-    let mut spans = vec![
-        Span::styled(
-            format!(" {} ", state.mode.label()),
-            Style::default().bg(mode_style).fg(Color::Black),
-        ),
-        Span::raw(" "),
-    ];
-    if !state.model.is_empty() {
+    // busy：CC 式运行态行「✻ 思考中… (15s · ↑1.2k ↓3.4k · esc 打断)」
+    let mut spans = if state.busy {
+        let elapsed = state
+            .turn_started
+            .map_or(std::time::Duration::ZERO, |t| t.elapsed());
+        vec![
+            Span::styled(
+                format!("{} ", spinner_frame(elapsed)),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{}…", state.status),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" ("),
+            Span::styled(
+                format_elapsed(elapsed),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::raw(" · "),
+            Span::styled(state.tokens.render(), Style::default().fg(Color::DarkGray)),
+            Span::raw(" · "),
+            Span::styled("esc 打断", Style::default().fg(Color::DarkGray)),
+            Span::raw(")"),
+        ]
+    } else {
+        vec![
+            Span::styled(
+                format!(" {} ", state.mode.label()),
+                Style::default().bg(mode_style).fg(Color::Black),
+            ),
+            Span::raw(" "),
+        ]
+    };
+    if !state.busy && !state.model.is_empty() {
         spans.push(Span::styled(
             state.model.clone(),
             Style::default().fg(Color::Magenta),
         ));
         spans.push(Span::raw("  "));
     }
-    spans.push(Span::styled(
-        state.status.clone(),
-        Style::default().fg(Color::DarkGray),
-    ));
-    spans.push(Span::raw("  "));
-    spans.push(Span::styled(
-        state.tokens.render(),
-        Style::default().fg(Color::DarkGray),
-    ));
-    spans.push(Span::raw("  "));
-    spans.push(Span::styled(
-        if state.show_details {
-            "详情"
-        } else {
-            "简洁"
-        },
-        Style::default().fg(Color::DarkGray),
-    ));
+    if !state.busy {
+        spans.push(Span::styled(
+            if state.show_details {
+                "详情"
+            } else {
+                "简洁"
+            },
+            Style::default().fg(Color::DarkGray),
+        ));
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            state.tokens.render(),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
     f.render_widget(Paragraph::new(RLine::from(spans)), area);
+}
+
+/// busy 转圈帧（~120ms/帧，环绕）。
+fn spinner_frame(elapsed: std::time::Duration) -> &'static str {
+    const FRAMES: &[&str] = &["·", "✢", "✳", "∗", "✻", "✽"];
+    FRAMES[(elapsed.as_millis() / 120) as usize % FRAMES.len()]
+}
+
+/// 回合计时：15s / 1m05s / 60m00s。
+fn format_elapsed(elapsed: std::time::Duration) -> String {
+    let total = elapsed.as_secs();
+    if total < 60 {
+        format!("{total}s")
+    } else {
+        format!("{}m{:02}s", total / 60, total % 60)
+    }
 }
 
 #[cfg(test)]
@@ -440,6 +482,26 @@ mod tests {
 
     fn spans_text(spans: &[Span<'_>]) -> String {
         spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn spinner_and_elapsed_formatting() {
+        use std::time::Duration;
+        // 帧序列随时间推进且环绕
+        assert_eq!(spinner_frame(Duration::from_millis(0)), "·");
+        assert_ne!(
+            spinner_frame(Duration::from_millis(0)),
+            spinner_frame(Duration::from_millis(130))
+        );
+        assert_eq!(
+            spinner_frame(Duration::from_millis(0)),
+            spinner_frame(Duration::from_millis(120 * 6)),
+            "一轮回绕到首帧"
+        );
+        // 计时格式：秒 / 分秒
+        assert_eq!(format_elapsed(Duration::from_secs(15)), "15s");
+        assert_eq!(format_elapsed(Duration::from_secs(65)), "1m05s");
+        assert_eq!(format_elapsed(Duration::from_secs(3600)), "60m00s");
     }
 
     #[test]
@@ -498,3 +560,4 @@ mod tests {
         assert_eq!(rows[0][1].style.fg, Some(Color::Blue));
     }
 }
+// 追加位置：测试模块内部（见下一段完整文件追加由脚本合并）
