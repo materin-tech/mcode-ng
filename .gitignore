@@ -1,0 +1,7 @@
+# Build
+/target
+**/target
+
+# Local state / secrets（真实密钥只进系统钥匙串或环境变量）
+*.log
+.DS_Store

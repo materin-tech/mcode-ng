@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = ["crates/mcode-core", "crates/mcode-cli"]
+
+[workspace.package]
+version = "0.2.0-alpha.1"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+# async runtime & http（延续 mcode 约束：rustls，禁 OpenSSL，兼容 musl 交叉编译）
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "json",
+    "stream",
+    "gzip",
+] }
+futures = "0.3"
+async-trait = "0.1"
+
+# ser/de
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# errors
+anyhow = "1"
+thiserror = "1"
+
+# misc（版本对齐现有 mcode-core：dirs 6）
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+globset = "0.4"
+walkdir = "2"
+similar = "2"
+shlex = "1"
+dirs = "6"
+bytes = "1"
+base64 = "0.22"
+unicode-width = "0.2"
+
+# tui
+ratatui = "0.29"
+crossterm = "0.28"
+
+# internal
+mcode-core = { path = "crates/mcode-core" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

@@ -1,0 +1,111 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # 静态检查单跑一槽（三平台重复 lint 无增益）
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # 三平台原生跑全量测试：cfg(windows)/cfg(unix) 路径只有原生 runner 能真正执行
+  # （macos-latest = Apple Silicon；windows-latest = x64 MSVC）
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  # ---- 发布产物：macos arm / linux arm+x86 (musl) / windows arm+x86 (msvc) ----
+
+  build-macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p mcode-cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcode-aarch64-apple-darwin
+          path: target/release/mcode
+
+  build-linux-x64-musl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p mcode-cli --target x86_64-unknown-linux-musl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcode-x86_64-linux-musl
+          path: target/x86_64-unknown-linux-musl/release/mcode
+
+  # GitHub 原生 arm64 linux runner：musl-tools 直出，免交叉工具链
+  build-linux-arm64-musl:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p mcode-cli --target aarch64-unknown-linux-musl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcode-aarch64-linux-musl
+          path: target/aarch64-unknown-linux-musl/release/mcode
+
+  build-windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p mcode-cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcode-x86_64-windows-msvc
+          path: target/release/mcode.exe
+
+  # Windows ARM64：x64 runner 交叉，需给 VS 补 ARM64 工具集（标准 vs_installer 配方）
+  build-windows-arm64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MSVC ARM64 build tools
+        shell: powershell
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+          $p = Start-Process -Wait -PassThru -FilePath $installer -ArgumentList 'modify','--installPath',"$vs",'--add','Microsoft.VisualStudio.Component.VC.Tools.ARM64','--quiet'
+          exit $p.ExitCode
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p mcode-cli --target aarch64-pc-windows-msvc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcode-aarch64-windows-msvc
+          path: target/aarch64-pc-windows-msvc/release/mcode.exe

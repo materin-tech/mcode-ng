@@ -1,0 +1,355 @@
+//! TUI 渲染：transcript + composer + statusline 三段布局。
+//!
+//! 只读 AppState，不改状态；滚动语义：贴底自动跟随，PageUp/PageDown/
+//! 滚轮临时回看，一旦有新内容回贴底。
+
+use super::state::{AppState, LineKind};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line as RLine, Span};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::Frame;
+
+/// 处理按键（编辑/滚动/模式/退出）；返回是否被消费。
+pub fn on_key(state: &mut AppState, key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            state.should_quit = true;
+            true
+        }
+        KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            state.show_details = !state.show_details;
+            true
+        }
+        KeyCode::PageUp => {
+            scroll_up(state, 10);
+            true
+        }
+        KeyCode::PageDown => {
+            scroll_down(state, 10);
+            true
+        }
+        KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            scroll_up(state, 3);
+            true
+        }
+        KeyCode::Down if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            scroll_down(state, 3);
+            true
+        }
+        KeyCode::Up => {
+            state.history_prev();
+            true
+        }
+        KeyCode::Down => {
+            state.history_next();
+            true
+        }
+        KeyCode::Backspace => {
+            state.input.pop();
+            true
+        }
+        KeyCode::Enter => true, // 交给 run 循环（要触发 send 逻辑）
+        KeyCode::Char(ch) => {
+            state.input.push(ch);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// 滚轮：上滚回看，下滚回底。
+pub fn on_mouse(state: &mut AppState, kind: MouseEventKind) {
+    match kind {
+        MouseEventKind::ScrollUp => scroll_up(state, 3),
+        MouseEventKind::ScrollDown => scroll_down(state, 3),
+        MouseEventKind::Down(MouseButton::Left) => {}
+        _ => {}
+    }
+}
+
+fn scroll_up(state: &mut AppState, n: u16) {
+    state.scroll_from_bottom = Some(state.scroll_from_bottom.unwrap_or(0).saturating_add(n));
+}
+
+fn scroll_down(state: &mut AppState, n: u16) {
+    let next = state.scroll_from_bottom.unwrap_or(0).saturating_sub(n);
+    state.scroll_from_bottom = if next == 0 { None } else { Some(next) };
+}
+
+/// 整帧绘制。
+pub fn draw(f: &mut Frame, state: &AppState) {
+    let [transcript, composer, status] = Layout::vertical([
+        Constraint::Min(5),
+        Constraint::Length(3),
+        Constraint::Length(1),
+    ])
+    .areas(f.area());
+
+    draw_transcript(f, state, transcript);
+    draw_composer(f, state, composer);
+    draw_statusline(f, state, status);
+    if state.completion.is_some() {
+        draw_completion(f, state, transcript);
+    }
+    draw_overlays(f, state, f.area());
+}
+
+/// @ 文件补全弹窗：贴在 composer 上沿，盖住 transcript 底部。
+fn draw_completion(f: &mut Frame, state: &AppState, area: Rect) {
+    let Some(c) = &state.completion else { return };
+    let mut lines: Vec<RLine> = c
+        .candidates
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let style = if i == c.selected {
+                Style::default().bg(Color::Blue).fg(Color::White)
+            } else {
+                Style::default()
+            };
+            RLine::from(Span::styled(format!(" {p} "), style))
+        })
+        .collect();
+    lines.push(RLine::from(Span::styled(
+        "↑↓ 选择 · Tab/Enter 补全 · Esc 关闭",
+        Style::default().fg(Color::DarkGray),
+    )));
+    let w = 52.min(area.width);
+    let h = (lines.len() as u16 + 2).min(area.height).min(10);
+    let box_area = Rect {
+        x: area.x,
+        y: area.bottom().saturating_sub(h),
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, box_area);
+    f.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .title(Span::styled(
+                    " @ 文件 ",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )),
+        ),
+        box_area,
+    );
+}
+
+/// 覆盖层：权限确认弹窗 / rewind 列表（后画者在上）。
+fn draw_overlays(f: &mut Frame, state: &AppState, area: Rect) {
+    if state.rewind.is_some() {
+        draw_rewind(f, state, area);
+    }
+    if state.confirm.is_some() {
+        draw_confirm(f, state, area);
+    }
+}
+
+/// 居中矩形（钳制在 area 内）。
+fn centered(width: u16, height: u16, area: Rect) -> Rect {
+    let w = width.min(area.width);
+    let h = height.min(area.height);
+    Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    }
+}
+
+fn draw_confirm(f: &mut Frame, state: &AppState, area: Rect) {
+    let Some(c) = &state.confirm else { return };
+    let body = vec![
+        RLine::from(Span::styled(
+            format!("工具 {} 请求执行：", c.tool),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        RLine::from(""),
+        RLine::from(Span::styled(
+            c.args_summary.clone(),
+            Style::default().fg(Color::DarkGray),
+        )),
+        RLine::from(""),
+        RLine::from(Span::styled(
+            "[y/Enter] 允许一次   [a] 本会话总是允许   [n/Esc] 拒绝",
+            Style::default().fg(Color::Yellow),
+        )),
+    ];
+    let box_area = centered(62, (body.len() as u16) + 2, area);
+    f.render_widget(Clear, box_area);
+    f.render_widget(
+        Paragraph::new(body).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow))
+                .title(Span::styled(
+                    " 权限确认 ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )),
+        ),
+        box_area,
+    );
+}
+
+fn draw_rewind(f: &mut Frame, state: &AppState, area: Rect) {
+    let Some(sel) = state.rewind else { return };
+    // 最新在前展示；选中下标（最新在前）映射回时间序比对
+    let mut items: Vec<RLine> = Vec::new();
+    for (i, cp) in state.checkpoints.iter().enumerate().rev() {
+        let style = if state.checkpoints.len() - 1 - sel == i {
+            Style::default().bg(Color::Blue).fg(Color::White)
+        } else {
+            Style::default()
+        };
+        let prompt: String = cp.prompt.chars().take(48).collect();
+        items.push(RLine::from(Span::styled(format!(" {prompt} "), style)));
+    }
+    items.push(RLine::from(Span::styled(
+        "↑↓ 选择 · Enter 回退到此处（丢弃其后改动）· Esc 取消",
+        Style::default().fg(Color::DarkGray),
+    )));
+    let h = (items.len() as u16 + 2).min(area.height * 2 / 3);
+    let box_area = centered(64, h, area);
+    f.render_widget(Clear, box_area);
+    f.render_widget(
+        Paragraph::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue))
+                .title(Span::styled(
+                    " 回退会话 ",
+                    Style::default()
+                        .fg(Color::Blue)
+                        .add_modifier(Modifier::BOLD),
+                )),
+        ),
+        box_area,
+    );
+}
+
+fn draw_transcript(f: &mut Frame, state: &AppState, area: Rect) {
+    let mut lines: Vec<RLine> = Vec::with_capacity(state.lines.len() + 2);
+    for l in &state.lines {
+        // 思考流只在详情视图出现
+        if l.kind == LineKind::Thinking && !state.show_details {
+            continue;
+        }
+        let style = match l.kind {
+            LineKind::User => Style::default().fg(Color::Cyan),
+            LineKind::Assistant => Style::default(),
+            LineKind::Tool => Style::default().fg(Color::DarkGray),
+            LineKind::Thinking => Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::ITALIC),
+            LineKind::System => Style::default().fg(Color::Yellow),
+        };
+        let prefix = if l.kind == LineKind::User { "> " } else { "" };
+        // 详情视图：有 detail 的行展开为多行（工具完整输出/思考全文）
+        let body_text = if state.show_details {
+            l.detail.as_deref().unwrap_or(l.text.as_str())
+        } else {
+            l.text.as_str()
+        };
+        for (i, seg) in body_text.split('\n').enumerate() {
+            if i == 0 {
+                lines.push(RLine::from(vec![
+                    Span::styled(prefix, style.add_modifier(Modifier::BOLD)),
+                    Span::styled(seg.to_string(), style),
+                ]));
+            } else {
+                lines.push(RLine::from(Span::styled(seg.to_string(), style)));
+            }
+        }
+    }
+    // 空会话引导
+    if lines.is_empty() {
+        lines.push(RLine::from(Span::styled(
+            "MCode 已就绪。输入需求开始，/help 看命令，shift+tab 切权限模式。",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    // 从底部上计的滚动偏移（贴底时 0）
+    let total = lines.len() as u16;
+    let offset_from_bottom = state
+        .scroll_from_bottom
+        .unwrap_or(0)
+        .min(total.saturating_sub(1));
+    let visible_end = total.saturating_sub(offset_from_bottom);
+    let start = lines.len().saturating_sub(visible_end as usize);
+    lines.drain(0..start);
+
+    let para = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .block(Block::default().borders(Borders::NONE));
+    f.render_widget(para, area);
+}
+
+fn draw_composer(f: &mut Frame, state: &AppState, area: Rect) {
+    let title = if state.busy {
+        format!("输入（排队 {} 条，esc 打断）", state.queue.len())
+    } else {
+        "输入".to_string()
+    };
+    let para = Paragraph::new(state.input.as_str())
+        .wrap(Wrap { trim: false })
+        .block(Block::default().borders(Borders::ALL).title(Span::styled(
+            title,
+            Style::default().fg(if state.busy {
+                Color::Yellow
+            } else {
+                Color::Blue
+            }),
+        )));
+    f.render_widget(para, area);
+}
+
+fn draw_statusline(f: &mut Frame, state: &AppState, area: Rect) {
+    let mode_style = match state.mode {
+        mcode_core::permission::Mode::Passon => Color::DarkGray,
+        mcode_core::permission::Mode::Auto => Color::Green,
+        mcode_core::permission::Mode::Manual => Color::Yellow,
+        mcode_core::permission::Mode::Plan => Color::Blue,
+    };
+    let mut spans = vec![
+        Span::styled(
+            format!(" {} ", state.mode.label()),
+            Style::default().bg(mode_style).fg(Color::Black),
+        ),
+        Span::raw(" "),
+    ];
+    if !state.model.is_empty() {
+        spans.push(Span::styled(
+            state.model.clone(),
+            Style::default().fg(Color::Magenta),
+        ));
+        spans.push(Span::raw("  "));
+    }
+    spans.push(Span::styled(
+        state.status.clone(),
+        Style::default().fg(Color::DarkGray),
+    ));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        state.tokens.render(),
+        Style::default().fg(Color::DarkGray),
+    ));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        if state.show_details {
+            "详情"
+        } else {
+            "简洁"
+        },
+        Style::default().fg(Color::DarkGray),
+    ));
+    f.render_widget(Paragraph::new(RLine::from(spans)), area);
+}

@@ -1,0 +1,109 @@
+name: release
+'on':
+  push:
+    tags:
+    - v*
+permissions:
+  contents: write
+jobs:
+  build-macos-arm64:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - name: Build
+      run: cargo build --release -p mcode-cli
+    - uses: actions/upload-artifact@v4
+      with:
+        name: mcode-aarch64-apple-darwin
+        path: target/release/mcode
+        if-no-files-found: error
+  build-linux-x64:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install musl tools
+      run: sudo apt-get update && sudo apt-get install -y musl-tools
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: x86_64-unknown-linux-musl
+    - uses: Swatinem/rust-cache@v2
+    - name: Build
+      run: cargo build --release -p mcode-cli --target x86_64-unknown-linux-musl
+    - uses: actions/upload-artifact@v4
+      with:
+        name: mcode-x86_64-linux-musl
+        path: target/x86_64-unknown-linux-musl/release/mcode
+        if-no-files-found: error
+  build-linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install musl tools
+      run: sudo apt-get update && sudo apt-get install -y musl-tools
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-unknown-linux-musl
+    - uses: Swatinem/rust-cache@v2
+    - name: Build
+      run: cargo build --release -p mcode-cli --target aarch64-unknown-linux-musl
+    - uses: actions/upload-artifact@v4
+      with:
+        name: mcode-aarch64-linux-musl
+        path: target/aarch64-unknown-linux-musl/release/mcode
+        if-no-files-found: error
+  build-windows-x64:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - name: Build
+      run: cargo build --release -p mcode-cli
+    - uses: actions/upload-artifact@v4
+      with:
+        name: mcode-x86_64-windows-msvc
+        path: target/release/mcode.exe
+        if-no-files-found: error
+  build-windows-arm64:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install MSVC ARM64 build tools
+      shell: powershell
+      run: '$vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+
+        $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+
+        $p = Start-Process -Wait -PassThru -FilePath $installer -ArgumentList ''modify'',''--installPath'',"$vs",''--add'',''Microsoft.VisualStudio.Component.VC.Tools.ARM64'',''--quiet''
+
+        exit $p.ExitCode'
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-pc-windows-msvc
+    - uses: Swatinem/rust-cache@v2
+    - name: Build
+      run: cargo build --release -p mcode-cli --target aarch64-pc-windows-msvc
+    - uses: actions/upload-artifact@v4
+      with:
+        name: mcode-aarch64-windows-msvc
+        path: target/aarch64-pc-windows-msvc/release/mcode.exe
+        if-no-files-found: error
+  publish:
+    needs:
+    - build-macos-arm64
+    - build-linux-x64
+    - build-linux-arm64
+    - build-windows-x64
+    - build-windows-arm64
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        path: dist
+        merge-multiple: true
+    - name: Attach to GitHub Release
+      run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
