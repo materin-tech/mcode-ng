@@ -83,6 +83,16 @@ pub async fn compact_conversation(
     conv: &mut Conversation,
     emit: &EventSink,
 ) -> Result<String> {
+    compact_conversation_with(deps, conv, emit, None).await
+}
+
+/// `/compact [instructions]`：`instructions` 定制摘要侧重点（如「保留测试相关上下文」）。
+pub async fn compact_conversation_with(
+    deps: &AgentDeps,
+    conv: &mut Conversation,
+    emit: &EventSink,
+    instructions: Option<&str>,
+) -> Result<String> {
     let active = conv.active_messages();
     let total = active.len();
     anyhow::ensure!(
@@ -98,7 +108,7 @@ pub async fn compact_conversation(
 
     // 1) LLM 结构化摘要（失败 → 机械折叠，压缩永不失败会话）
     let model = deps.current_model();
-    let summary = match summarize_via_llm(deps, &to_summarize, &model).await {
+    let summary = match summarize_via_llm(deps, &to_summarize, &model, instructions).await {
         Ok(s) if !s.trim().is_empty() => s,
         _ => mechanical_summary(&to_summarize),
     };
@@ -127,14 +137,26 @@ pub async fn compact_conversation(
     Ok(summary)
 }
 
-async fn summarize_via_llm(deps: &AgentDeps, history: &[Message], model: &str) -> Result<String> {
+async fn summarize_via_llm(
+    deps: &AgentDeps,
+    history: &[Message],
+    model: &str,
+    instructions: Option<&str>,
+) -> Result<String> {
     use crate::api::{StreamEvent, StreamRequest};
     use futures::StreamExt;
 
     let backend = (deps.make_backend)(model)?;
     let req = StreamRequest {
         model: model.to_string(),
-        system: vec![compact_instructions()],
+        system: vec![match instructions {
+            Some(focus) if !focus.trim().is_empty() => format!(
+                "{}\n\n用户额外要求（摘要时优先保留相关内容）：{}",
+                compact_instructions(),
+                focus.trim()
+            ),
+            _ => compact_instructions(),
+        }],
         messages: vec![crate::message::ApiMessage::User {
             blocks: vec![ContentBlock::Text {
                 text: render_history_for_summary(history),

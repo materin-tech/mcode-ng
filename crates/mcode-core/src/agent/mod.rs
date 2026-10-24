@@ -8,6 +8,7 @@
 //! - [`compact`]：上下文压缩（阈值门控 + LLM 结构化摘要）。
 
 pub mod compact;
+pub mod goal;
 pub mod runner;
 
 use crate::message::{StopReason, Usage};
@@ -42,11 +43,14 @@ pub enum AgentEvent {
         partial_json: String,
         scope: Option<String>,
     },
-    /// 工具执行完成
+    /// 工具执行完成（`display` = 结构化富卡片数据：Diff/输出/文件引用，
+    /// UI 层直接渲染；`output` 是 ≤2000 字符的文本预览）
     ToolResult {
         name: String,
         success: bool,
         output: String,
+        #[allow(clippy::type_complexity)]
+        display: Option<crate::tools::DisplayBlock>,
         scope: Option<String>,
     },
     /// usage 记账（每次 API 往返一条）

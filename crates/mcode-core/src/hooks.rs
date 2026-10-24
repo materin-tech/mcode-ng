@@ -118,6 +118,11 @@ impl HookRunner {
         self.transcript_path = Some(p);
     }
 
+    /// 已配置的 hook 清单（/hooks 展示用）。
+    pub fn configs(&self) -> &[HookConfig] {
+        &self.hooks
+    }
+
     pub fn is_empty(&self) -> bool {
         self.hooks.is_empty()
     }

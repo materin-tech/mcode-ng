@@ -700,10 +700,12 @@ async fn run_one_tool(
     checkpoint_id: &str,
 ) -> (usize, PlannedToolCall, ToolResult) {
     let finish = |idx: usize, res: ToolResult| {
+        let display = res.display.clone();
         emit(AgentEvent::ToolResult {
             name: call.name.clone(),
             success: res.success,
             output: preview_text(&res.output),
+            display,
             scope: None,
         });
         (idx, call.clone(), res)

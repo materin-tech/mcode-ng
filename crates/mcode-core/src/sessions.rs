@@ -113,6 +113,19 @@ impl SessionStore {
         &self.dir
     }
 
+    /// 会话标题 sidecar（`<id>.title`，与 jsonl 同目录）。
+    /// `Some` = 写入自定义标题；`None` = 删除 sidecar（回落首条用户消息）。
+    pub fn set_title(&self, id: &str, title: Option<&str>) -> std::io::Result<()> {
+        let sidecar = self.dir().join(format!("{id}.title"));
+        match title {
+            Some(t) => std::fs::write(sidecar, t.trim()),
+            None => {
+                let _ = std::fs::remove_file(sidecar);
+                Ok(())
+            }
+        }
+    }
+
     /// 追加打开会话文件（start/resume 共用；create 兼顾新文件首开）。
     fn open_append(&self, path: PathBuf) -> Result<SessionHandle> {
         let file = OpenOptions::new()

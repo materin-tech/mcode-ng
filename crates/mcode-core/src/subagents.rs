@@ -236,6 +236,10 @@ impl AgentRegistry {
         self.agents.keys().cloned().collect()
     }
 
+    pub fn all(&self) -> Vec<&AgentDefinition> {
+        self.agents.values().collect()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.agents.is_empty()
     }
@@ -411,11 +415,13 @@ fn scoped_sink(scope: &str, parent: EventSink) -> EventSink {
                 name,
                 success,
                 output,
+                display,
                 ..
             } => AgentEvent::ToolResult {
                 name,
                 success,
                 output,
+                display,
                 scope: Some(scope.clone()),
             },
             // Usage / HookNotice 原样冒泡（记费用、提示均可跨代理）

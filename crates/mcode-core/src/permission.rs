@@ -45,6 +45,11 @@ impl Mode {
         }
     }
 
+    /// 标签名 → 模式（/mode <name> 用；与 [`Mode::label`] 互逆）
+    pub fn from_label(s: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|m| m.label() == s)
+    }
+
     pub fn hint(&self) -> &'static str {
         match self {
             Mode::Manual => "每个非只读工具执行前确认",
