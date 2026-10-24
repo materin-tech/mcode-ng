@@ -547,7 +547,13 @@ async fn stream_once(
     emit: &EventSink,
     cancel: &watch::Receiver<bool>,
 ) -> Result<Turn, ApiError> {
-    let mut stream = backend.stream(req).await?;
+    // 建连/等响应头同样必须在取消保护圈内：端点收下请求却迟迟不回响应头时
+    // （状态行停在思考中、↑0↓0），esc 要即时生效——drop 未完成的 future
+    // 即中断底层 HTTP 请求。
+    let mut stream = tokio::select! {
+        _ = wait_cancel(cancel.clone()) => return Err(ApiError::cancelled()),
+        r = backend.stream(req) => r?,
+    };
     let mut agg = StreamAggregator::new();
     let cancel_fut = wait_cancel(cancel.clone());
     tokio::pin!(cancel_fut);
@@ -1427,6 +1433,54 @@ mod tests {
 
         assert!(outcome.interrupted);
         assert!(matches!(h.emitted().last(), Some(AgentEvent::Done { .. })));
+    }
+
+    #[tokio::test]
+    async fn cancel_during_headers_wait_interrupts() {
+        // 用户实测：端点收下请求却迟迟不回响应头（状态行停在思考中、↑0↓0），
+        // esc 必须能在「backend.stream 尚未返回」的阶段掐断回合。
+        struct HangingHeadersBackend;
+        #[async_trait::async_trait]
+        impl ModelBackend for HangingHeadersBackend {
+            fn backend_name(&self) -> &'static str {
+                "hanging"
+            }
+            async fn stream(
+                &self,
+                _req: StreamRequest,
+            ) -> Result<futures::stream::BoxStream<'static, Result<StreamEvent, ApiError>>, ApiError>
+            {
+                // 模拟响应头永不到达
+                std::future::pending::<()>().await;
+                unreachable!("pending 永不完成")
+            }
+        }
+        let events = Arc::new(std::sync::Mutex::new(Vec::<AgentEvent>::new()));
+        let deps = AgentDeps::with_registry(
+            "m",
+            vec![],
+            Arc::new(|_: &str| Ok(Arc::new(HangingHeadersBackend) as Arc<dyn ModelBackend>)),
+            ToolRegistry::new_empty(),
+        );
+        // 回合入口看到的是未取消位；stream() 悬挂期间取消位才置位
+        let tx = deps.cancel_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let _ = tx.send(true);
+        });
+        let sink: EventSink = {
+            let ev = events.clone();
+            Arc::new(move |e| ev.lock().unwrap().push(e))
+        };
+        let mut conv = Conversation::new();
+        conv.push(Message::user_text("hi"));
+        let outcome = run_agent_turn(&deps, &mut conv, &RunOpts::new(vec![]), &sink).await;
+
+        assert!(outcome.interrupted);
+        assert!(matches!(
+            events.lock().unwrap().last(),
+            Some(AgentEvent::Done { .. })
+        ));
     }
 
     #[tokio::test]

@@ -207,10 +207,12 @@ pub fn build_backend(cfg: &BackendConfig) -> Box<dyn ModelBackend> {
 }
 
 /// 共享 HTTP 客户端。连接超时 15s；**不设总超时**——流式响应时长不可预估，
-/// 挂死防护由 [`with_read_timeout`] 在事件层兜底。
+/// 挂死防护双保险：`read_timeout` 兜住「等响应头」阶段（端点收下请求后
+/// 永不回头的场景），[`with_read_timeout`] 在事件层兜住块间空闲。
 pub fn http_client() -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
+        .read_timeout(STREAM_IDLE_TIMEOUT)
         .pool_idle_timeout(Duration::from_secs(90))
         .build()
         .expect("reqwest client 构建失败（静态配置，不可能失败）")
