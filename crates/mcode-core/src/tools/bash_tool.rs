@@ -38,8 +38,10 @@ impl BashTool {
 
 #[cfg(windows)]
 fn build_windows_cmd(cmd: &str, cwd: &Path) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
     let mut c = std::process::Command::new("cmd");
-    c.arg("/C").arg(cmd).current_dir(cwd);
+    // 同 hooks::shell_command：raw_arg 避免 MSVCRT 引号转义 × cmd 引号剥离互坑
+    c.arg("/C").raw_arg(cmd).current_dir(cwd);
     c
 }
 

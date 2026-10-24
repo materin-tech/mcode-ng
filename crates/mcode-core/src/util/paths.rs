@@ -86,7 +86,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // 场景前提是「已存在的符号链接」——Windows 建链接需要特权（开发者模式/管理员），
+    // 非特权环境下该场景无法成立（点号穿越由 rejects_escape_via_dotdot 覆盖）
     #[test]
+    #[cfg(unix)]
     fn rejects_escape_via_existing_symlink() {
         let root = tmpdir("sym");
         let outside = tmpdir("sym-outside");

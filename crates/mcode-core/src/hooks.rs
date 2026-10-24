@@ -254,17 +254,22 @@ struct HookExec {
 }
 
 /// 跨平台 shell 包装：Unix `sh -c`；Windows `cmd /S /C`（并隐藏控制台窗口）。
+/// Windows 必须 `raw_arg` 原样传命令：`arg()` 按 MSVCRT 规则把 `"` 转义成
+/// `\"`，再经 cmd /S 剥掉首尾引号后，命令文本里的引号全成字面 `\"`——
+/// echo 出的 JSON 解析必败、重定向目标非法（曾致 CI windows 全红 + 死循环）。
+#[cfg(windows)]
 fn shell_command(command: &str) -> tokio::process::Command {
-    if cfg!(windows) {
-        let mut c = tokio::process::Command::new("cmd");
-        c.arg("/S").arg("/C").arg(command);
-        crate::util::hide_console_window(&mut c);
-        c
-    } else {
-        let mut c = tokio::process::Command::new("sh");
-        c.arg("-c").arg(command);
-        c
-    }
+    let mut c = tokio::process::Command::new("cmd");
+    c.arg("/S").arg("/C").raw_arg(command);
+    crate::util::hide_console_window(&mut c);
+    c
+}
+
+#[cfg(not(windows))]
+fn shell_command(command: &str) -> tokio::process::Command {
+    let mut c = tokio::process::Command::new("sh");
+    c.arg("-c").arg(command);
+    c
 }
 
 async fn run_hook_command(cfg: &HookConfig, payload: &Value) -> HookExec {
