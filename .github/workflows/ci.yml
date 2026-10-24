@@ -32,7 +32,7 @@ jobs:
       run: "$ErrorActionPreference = 'Stop'\n# 编译期单独可见（这一步可能占大头；job 能完成，缓存才落得下）\n\
         cargo test --workspace --no-run\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE\
         \ }\n# 抓测试二进制清单（增量，秒回）\n$bins = cargo test --workspace --no-run --message-format=json\
-        \ 2>$null |\n  Where-Object { $_ -like '{%' } | ForEach-Object { $_ | ConvertFrom-Json\
+        \ 2>$null |\n  Where-Object { $_.StartsWith('{') } | ForEach-Object { $_ | ConvertFrom-Json\
         \ } |\n  Where-Object { $_.executable -and $_.profile.test } |\n  Select-Object\
         \ -Unique -ExpandProperty executable\nWrite-Host \"test binaries: $($bins.Count)\"\
         \n# 逐二进制跑：单个 8 分钟封顶，超时即杀进程树并让 job 变红点名\nforeach ($b in $bins) {\n  Write-Host\
