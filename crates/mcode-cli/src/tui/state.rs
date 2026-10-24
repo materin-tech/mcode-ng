@@ -4,6 +4,9 @@
 
 use mcode_core::agent::AgentEvent;
 use std::collections::VecDeque;
+use std::path::PathBuf;
+
+use super::complete::CompletionCandidate;
 
 /// transcript 一行。`detail` 存完整内容（ctrl+o 详情视图渲染；缺省 = text）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,16 +69,20 @@ pub struct ConfirmPrompt {
     pub args_summary: String,
 }
 
-/// 补全弹窗（'@' 文件 / '/' 命令共用骨架）。
+/// 补全弹窗（'@' 文件层级浏览 / '/' 命令共用骨架）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Completion {
     /// 触发字符在 input 中的字节下标（accept 时从这里替换）。
     pub at: usize,
     /// 触发字符：'@' 文件补全 / '/' 命令补全。
     pub trigger: char,
-    /// 候选（已按片段过滤；文件封顶 20 条）。
-    pub candidates: Vec<String>,
+    /// '@' 已确认的目录层（'/' 结尾；空 = 工作区根）。随下钻刷新。
+    pub dir_part: String,
+    /// 候选（已按当前层片段前缀过滤；封顶 20 条）。
+    pub candidates: Vec<CompletionCandidate>,
     pub selected: usize,
+    /// '@' 层级浏览的根（工作区 cwd；'/' 命令补全时为空路径）。
+    pub root: PathBuf,
 }
 
 /// 候选弹窗最多显示条数。
@@ -148,7 +155,7 @@ pub struct AppState {
     /// @ 文件补全弹窗（Some = 打开，按键被部分拦截）。
     pub completion: Option<Completion>,
     /// 工作区文件清单（@ 补全数据源；启动时由 run 循环填充）。
-    pub workspace_files: Vec<String>,
+    pub workspace_root: PathBuf,
     /// 斜杠命令表（内置 + 技能名；启动时由 run 循环填充）。
     pub slash_commands: Vec<String>,
 }
@@ -544,8 +551,9 @@ impl AppState {
     }
 
     /// 设置工作区文件清单（@ 补全数据源，启动时调用一次）。
-    pub fn set_workspace_files(&mut self, files: Vec<String>) {
-        self.workspace_files = files;
+    /// 设置补全浏览根（工作区 cwd，启动时调用一次）。
+    pub fn set_workspace_root(&mut self, root: PathBuf) {
+        self.workspace_root = root;
     }
 
     /// 设置斜杠命令表（内置 + 技能名，启动时调用一次）。
@@ -553,16 +561,18 @@ impl AppState {
         self.slash_commands = cmds;
     }
 
-    /// 输入了 '@'（已是 input 最后一字节）：打开文件补全并出候选。
+    /// 输入了 '@'（已是 input 最后一字节）：打开文件层级浏览（根目录层）。
     pub fn open_completion(&mut self) {
-        if self.workspace_files.is_empty() {
+        if self.workspace_root.as_os_str().is_empty() {
             return;
         }
         self.completion = Some(Completion {
             at: self.input.len().saturating_sub(1),
             trigger: '@',
+            dir_part: String::new(),
             candidates: Vec::new(),
             selected: 0,
+            root: self.workspace_root.clone(),
         });
         self.refresh_completion();
     }
@@ -575,14 +585,17 @@ impl AppState {
         self.completion = Some(Completion {
             at: 0,
             trigger: '/',
+            dir_part: String::new(),
             candidates: Vec::new(),
             selected: 0,
+            root: std::path::PathBuf::new(),
         });
         self.refresh_completion();
     }
 
     /// 输入变化后刷新候选：触发字符被删 / 片段含空格或再次出现触发类字符 /
-    /// 无匹配 → 关闭。
+    /// 无匹配 → 关闭。'@' 走层级浏览：片段最后一段是当前层过滤词，其余是
+    /// 已确认目录前缀，每次实时 read_dir 一层（动态反映文件系统）。
     pub fn refresh_completion(&mut self) {
         let Some(c) = self.completion.as_mut() else {
             return;
@@ -601,7 +614,7 @@ impl AppState {
             self.completion = None;
             return;
         }
-        let matched: Vec<String> = if c.trigger == '/' {
+        let matched: Vec<CompletionCandidate> = if c.trigger == '/' {
             // 命令名不含 '/'：片段出现 '/' 说明已进入路径式输入，关闭
             if fragment.contains('/') {
                 self.completion = None;
@@ -610,14 +623,30 @@ impl AppState {
             self.slash_commands
                 .iter()
                 .filter(|n| n.starts_with(&fragment))
-                .cloned()
+                .map(|n| CompletionCandidate {
+                    insert: n.clone(),
+                    display: n.clone(),
+                    is_dir: false,
+                })
                 .collect()
         } else {
-            self.workspace_files
-                .iter()
-                .filter(|p| p.to_lowercase().contains(&fragment))
+            // '@'：dir_part 原样用于路径解析，base 才大小写不敏感过滤
+            let frag = &self.input[c.at + 1..];
+            let (dir_part, base) = match frag.rfind('/') {
+                Some(i) => (&frag[..=i], &frag[i + 1..]),
+                None => ("", frag),
+            };
+            let base = base.to_lowercase();
+            c.dir_part = dir_part.to_string();
+            super::complete::list_dir(&c.root, dir_part)
+                .into_iter()
+                .filter(|e| e.display.to_lowercase().starts_with(&base))
                 .take(MAX_COMPLETION_CANDIDATES)
-                .cloned()
+                .map(|e| CompletionCandidate {
+                    insert: format!("{dir_part}{}", e.insert),
+                    display: e.display,
+                    is_dir: e.is_dir,
+                })
                 .collect()
         };
         if matched.is_empty() {
@@ -657,13 +686,22 @@ impl AppState {
         c.selected = (c.selected as i32 + delta).rem_euclid(len) as usize;
     }
 
-    /// 接受当前候选：`@frag` → `@path␣`（斜杠命令同理）。返回接受的候选。
+    /// 接受当前候选：文件 → `@完整路径␣` 收窗；目录 → `@目录/` **下钻**，
+    /// 窗口保持打开并刷新为子层候选（斜杠命令等同文件收尾）。返回接受的候选。
     pub fn accept_completion(&mut self) -> Option<String> {
-        let c = self.completion.take()?;
-        let path = c.candidates.get(c.selected)?.clone();
-        let head = self.input[..c.at].to_string();
-        self.set_input(format!("{head}{}{path} ", c.trigger));
-        Some(path)
+        let (at, trigger, cand) = {
+            let c = self.completion.as_ref()?;
+            (c.at, c.trigger, c.candidates.get(c.selected)?.clone())
+        };
+        let head = self.input[..at].to_string();
+        if cand.is_dir {
+            self.set_input(format!("{head}{trigger}{}", cand.insert));
+            self.refresh_completion();
+        } else {
+            self.completion = None;
+            self.set_input(format!("{head}{trigger}{} ", cand.insert));
+        }
+        Some(cand.insert)
     }
 
     pub fn close_completion(&mut self) {
@@ -736,14 +774,15 @@ mod tests {
 
     #[test]
     fn accept_completion_puts_cursor_at_end() {
-        let mut s = AppState::default();
-        let mut files = vec!["src/main.rs".to_string(), "docs/guide.md".to_string()];
-        files.sort();
-        s.set_workspace_files(files);
-        // 忠实按键序：'@' 打开 → 敲片段刷新 → Tab 接受
+        let mut s = completion_state();
+        // 忠实按键序：'@' 打开 → `s` 过滤出 src/ → 接受下钻 → `m` 过滤 main.rs → 接受
         s.input = "@".into();
         s.open_completion();
-        s.input = "@ma".into();
+        s.input = "@s".into();
+        s.refresh_completion();
+        s.accept_completion();
+        assert_eq!(s.input, "@src/", "目录候选下钻");
+        s.input = "@src/m".into();
         s.refresh_completion();
         s.accept_completion();
         assert_eq!(s.input, "@src/main.rs ");
@@ -966,16 +1005,34 @@ mod tests {
 
     fn completion_state() -> AppState {
         let mut s = AppState::default();
-        // 生产路径 collect_workspace_files 有序，这里同序构造
-        let mut files = vec![
-            "src/main.rs".to_string(),
-            "src/lib.rs".to_string(),
-            "docs/guide.md".to_string(),
-            "README.md".to_string(),
-        ];
-        files.sort();
-        s.set_workspace_files(files);
+        s.set_workspace_root(make_file_tree());
         s
+    }
+
+    /// 真实临时目录树（list_dir 是实时 read_dir，不收假清单）：
+    /// 根层 docs/ src/ README.md；src/ 下 lib.rs main.rs；docs/ 下 guide.md。
+    fn make_file_tree() -> PathBuf {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp =
+            std::env::temp_dir().join(format!("mcode-tui-completion-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        for p in ["src/main.rs", "src/lib.rs", "docs/guide.md", "README.md"] {
+            let f = tmp.join(p);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, "x").unwrap();
+        }
+        tmp
+    }
+
+    fn displays(s: &AppState) -> Vec<String> {
+        s.completion
+            .as_ref()
+            .unwrap()
+            .candidates
+            .iter()
+            .map(|c| c.display.clone())
+            .collect()
     }
 
     #[test]
@@ -986,26 +1043,38 @@ mod tests {
         s.open_completion();
         let c = s.completion.as_ref().expect("打开");
         assert_eq!(c.at, 0);
+        // 根层：目录在前（带尾 /）、文件在后，各按名字排序
+        assert_eq!(displays(&s), vec!["docs/", "src/", "README.md"]);
 
-        s.input = "@ma".into();
+        // 当前层前缀过滤（层级浏览，不再全路径平铺）
+        s.input = "@d".into();
         s.refresh_completion();
-        assert_eq!(
-            s.completion.as_ref().unwrap().candidates,
-            vec!["src/main.rs".to_string()],
-            "只中 main"
-        );
+        assert_eq!(displays(&s), vec!["docs/"], "只中 docs/");
 
         // 大小写不敏感
         s.input = "@READ".into();
         s.refresh_completion();
-        assert_eq!(s.completion.as_ref().unwrap().candidates, vec!["README.md"]);
+        assert_eq!(displays(&s), vec!["README.md"]);
+
+        // 目录前缀下钻：@src/ 列出子层
+        s.input = "@src/".into();
+        s.refresh_completion();
+        assert_eq!(displays(&s), vec!["lib.rs", "main.rs"]);
+        assert_eq!(
+            s.completion.as_ref().unwrap().dir_part,
+            "src/",
+            "dir_part 跟随下钻"
+        );
+        s.input = "@src/m".into();
+        s.refresh_completion();
+        assert_eq!(displays(&s), vec!["main.rs"]);
 
         // 无匹配 → 关闭
-        s.input = "@zzz".into();
+        s.input = "@src/zzz".into();
         s.refresh_completion();
         assert!(s.completion.is_none());
 
-        // 空文件清单不开
+        // 空工作区根不开
         let mut e = AppState {
             input: "@".into(),
             ..Default::default()
@@ -1035,31 +1104,43 @@ mod tests {
     }
 
     #[test]
-    fn completion_move_wraps_and_accept_appends_space() {
+    fn accept_directory_drills_down_file_closes_window() {
         let mut s = completion_state();
         s.input = "@".into();
         s.open_completion();
+        // 根层候选：docs/(0) src/(1) README.md(2)
         let n = s.completion.as_ref().unwrap().candidates.len();
-        assert_eq!(n, 4);
-
+        assert_eq!(n, 3);
         s.completion_move(-1);
         assert_eq!(s.completion.as_ref().unwrap().selected, n - 1, "向上环绕");
         s.completion_move(1);
         assert_eq!(s.completion.as_ref().unwrap().selected, 0, "向下回绕");
-        s.completion_move(2);
-        assert_eq!(s.completion.as_ref().unwrap().selected, 2);
 
-        // 排序后候选：README.md, docs/guide.md, src/lib.rs, src/main.rs → 下标 2
+        // 选中 src/（下标 1）接受 → 下钻，窗口保持打开
+        s.completion_move(1);
         let accepted = s.accept_completion().unwrap();
-        assert_eq!(accepted, "src/lib.rs");
-        assert!(s.completion.is_none(), "accept 消费弹窗");
-        assert_eq!(s.input, "@src/lib.rs ", "替换并补尾随空格");
+        assert_eq!(accepted, "src/");
+        assert!(s.completion.is_some(), "目录接受 = 下钻，弹窗保持");
+        assert_eq!(s.input, "@src/");
+        assert_eq!(displays(&s), vec!["lib.rs", "main.rs"], "子层候选刷新");
 
-        // 输入中段的 '@'：替换只动 @frag，前缀保留
+        // 接受文件 → 收窗 + 完整路径 + 空格
+        s.completion_move(1); // main.rs
+        let accepted = s.accept_completion().unwrap();
+        assert_eq!(accepted, "src/main.rs");
+        assert!(s.completion.is_none(), "文件接受消费弹窗");
+        assert_eq!(s.input, "@src/main.rs ", "替换并补尾随空格");
+
+        // 输入中段的 '@'：目录前缀随下钻累积，替换只动 @frag
         let mut t = completion_state();
         t.input = "看下 @".into();
         t.open_completion();
-        t.input = "看下 @gu".into();
+        t.input = "看下 @d".into();
+        t.refresh_completion();
+        let picked = t.accept_completion().unwrap();
+        assert_eq!(picked, "docs/");
+        assert_eq!(t.input, "看下 @docs/");
+        t.input = "看下 @docs/g".into();
         t.refresh_completion();
         let picked = t.accept_completion().unwrap();
         assert_eq!(picked, "docs/guide.md");
@@ -1107,13 +1188,19 @@ mod tests {
     #[test]
     fn completion_window_scrolls_to_keep_selection_visible() {
         let mut s = AppState::default();
-        let files: Vec<String> = (0..30).map(|i| format!("dir/file{i:02}.txt")).collect();
-        s.set_workspace_files(files);
+        // 单层 30 个文件（实时列举的候选封顶 20）
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = std::env::temp_dir().join(format!("mcode-tui-completion-many-{n}"));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        for i in 0..30 {
+            std::fs::write(tmp.join(format!("file{i:02}.txt")), "x").unwrap();
+        }
+        s.set_workspace_root(tmp.clone());
         s.input = "@".into();
         s.open_completion();
-        // 候选封顶 20（refresh 截断），一屏可视 8
-        let n = s.completion.as_ref().unwrap().candidates.len();
-        assert_eq!(n, 20);
+        assert_eq!(s.completion.as_ref().unwrap().candidates.len(), 20);
         assert_eq!(s.completion_window(), (0, 8), "开窗默认顶部");
 
         for _ in 0..10 {
@@ -1127,6 +1214,7 @@ mod tests {
         }
         assert_eq!(s.completion.as_ref().unwrap().selected, 19, "移到末尾");
         assert_eq!(s.completion_window(), (12, 8), "选中到底部时窗口贴底钳制");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -1147,17 +1235,14 @@ mod tests {
         assert_eq!(c.trigger, '/');
         assert_eq!(c.at, 0);
         assert_eq!(
-            c.candidates,
+            displays(&s),
             vec!["help", "clear", "context", "mode", "model"]
         );
 
         // 继续敲 "mo" → 前缀过滤
         s.input = "/mo".into();
         s.refresh_completion();
-        assert_eq!(
-            s.completion.as_ref().unwrap().candidates,
-            vec!["mode", "model"]
-        );
+        assert_eq!(displays(&s), vec!["mode", "model"]);
 
         // 接受 → "/mode "，弹窗消费
         s.accept_completion();

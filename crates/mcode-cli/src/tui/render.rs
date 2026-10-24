@@ -162,7 +162,7 @@ fn draw_completion(f: &mut Frame, state: &AppState, area: Rect) {
             } else {
                 Style::default()
             };
-            RLine::from(Span::styled(format!(" {p} "), style))
+            RLine::from(Span::styled(format!(" {} ", p.display), style))
         })
         .collect();
     lines.push(RLine::from(Span::styled(
@@ -170,9 +170,13 @@ fn draw_completion(f: &mut Frame, state: &AppState, area: Rect) {
         Style::default().fg(Color::DarkGray),
     )));
     let title = if c.trigger == '@' {
-        " @ 文件 "
+        if c.dir_part.is_empty() {
+            " @ 文件 ".to_string()
+        } else {
+            format!(" @ {} ", c.dir_part)
+        }
     } else {
-        " 命令 "
+        " 命令 ".to_string()
     };
     let w = 52.min(area.width);
     let h = (vis as u16 + 3).min(area.height);

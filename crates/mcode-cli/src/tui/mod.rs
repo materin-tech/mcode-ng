@@ -357,7 +357,7 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
         model: rt.deps.model.clone(),
         ..Default::default()
     };
-    state.set_workspace_files(complete::collect_workspace_files(&cwd));
+    state.set_workspace_root(cwd.clone());
     let mut cmds: Vec<String> = state::BUILTIN_SLASH_COMMANDS
         .iter()
         .map(|s| s.to_string())
