@@ -14,10 +14,18 @@ jobs:
     - uses: Swatinem/rust-cache@v2
     - name: Build
       run: cargo build --release -p mcode-cli
+    - name: Package
+      run: 'mkdir -p stage
+
+        cp target/release/mcode stage/mcode
+
+        tar -czf mcode-${{ github.ref_name }}-macos-arm64.tar.gz -C stage mcode
+
+        '
     - uses: actions/upload-artifact@v4
       with:
         name: mcode-aarch64-apple-darwin
-        path: target/release/mcode
+        path: mcode-${{ github.ref_name }}-macos-arm64.tar.gz
         if-no-files-found: error
   build-linux-x64:
     runs-on: ubuntu-latest
@@ -31,10 +39,18 @@ jobs:
     - uses: Swatinem/rust-cache@v2
     - name: Build
       run: cargo build --release -p mcode-cli --target x86_64-unknown-linux-musl
+    - name: Package
+      run: 'mkdir -p stage
+
+        cp target/x86_64-unknown-linux-musl/release/mcode stage/mcode
+
+        tar -czf mcode-${{ github.ref_name }}-linux-x86_64.tar.gz -C stage mcode
+
+        '
     - uses: actions/upload-artifact@v4
       with:
         name: mcode-x86_64-linux-musl
-        path: target/x86_64-unknown-linux-musl/release/mcode
+        path: mcode-${{ github.ref_name }}-linux-x86_64.tar.gz
         if-no-files-found: error
   build-linux-arm64:
     runs-on: ubuntu-24.04-arm
@@ -48,10 +64,18 @@ jobs:
     - uses: Swatinem/rust-cache@v2
     - name: Build
       run: cargo build --release -p mcode-cli --target aarch64-unknown-linux-musl
+    - name: Package
+      run: 'mkdir -p stage
+
+        cp target/aarch64-unknown-linux-musl/release/mcode stage/mcode
+
+        tar -czf mcode-${{ github.ref_name }}-linux-arm64.tar.gz -C stage mcode
+
+        '
     - uses: actions/upload-artifact@v4
       with:
         name: mcode-aarch64-linux-musl
-        path: target/aarch64-unknown-linux-musl/release/mcode
+        path: mcode-${{ github.ref_name }}-linux-arm64.tar.gz
         if-no-files-found: error
   build-windows-x64:
     runs-on: windows-latest
@@ -61,10 +85,20 @@ jobs:
     - uses: Swatinem/rust-cache@v2
     - name: Build
       run: cargo build --release -p mcode-cli
+    - name: Package
+      run: 'mkdir stage -Force
+
+        Copy-Item target/release/mcode.exe stage/mcode.exe
+
+        Compress-Archive -Path stage/mcode.exe -DestinationPath mcode-${{ github.ref_name
+        }}-windows-x86_64.zip -Force
+
+        '
+      shell: pwsh
     - uses: actions/upload-artifact@v4
       with:
         name: mcode-x86_64-windows-msvc
-        path: target/release/mcode.exe
+        path: mcode-${{ github.ref_name }}-windows-x86_64.zip
         if-no-files-found: error
   publish:
     needs:
