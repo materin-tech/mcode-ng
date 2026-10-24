@@ -62,35 +62,35 @@ fn run_sync(
     }
 }
 
-/// 带超时与取消的等待：持续读干 stdout/stderr，超时/取消则 kill。
+/// 管道收割预算：进程结束后等 reader 线程吐残余的最长时间（孙进程
+/// 继承管道写端的极端情况下兜底，不 hang）。
+const REAP_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// 带超时与取消的等待。管道读交给独立线程——管道 read 是阻塞语义，
+/// 在轮询线程里读会让「无输出的长命令」饿死 deadline 检查（超时永不
+/// 触发，sleep 类命令跑满全程还报成功）。主线程只轮询退出状态/超时/
+/// 取消/截断；kill 或自然退出后写端关闭，reader 线程到 EOF 自然收尾。
 fn wait_with_timeout_and_cancel(
     mut child: std::process::Child,
     timeout: std::time::Duration,
     cancel: &tokio::sync::watch::Receiver<bool>,
 ) -> (String, String, Option<i32>, bool) {
-    let mut stdout_buf = Vec::new();
-    let mut stderr_buf = Vec::new();
-    let mut out = child.stdout.take();
-    let mut err = child.stderr.take();
+    let (out_tx, out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let (err_tx, err_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let capped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    spawn_pipe_reader(child.stdout.take(), out_tx, capped.clone());
+    spawn_pipe_reader(child.stderr.take(), err_tx, capped.clone());
+
     let deadline = std::time::Instant::now() + timeout;
     let mut killed = false;
     let mut code: Option<i32> = None;
     loop {
-        if *cancel.borrow() && !killed {
-            let _ = child.kill();
-            killed = true;
-        }
-        read_available(&mut out, &mut stdout_buf);
-        read_available(&mut err, &mut stderr_buf);
-        if stdout_buf.len() >= MAX_OUTPUT_BYTES || stderr_buf.len() >= MAX_OUTPUT_BYTES {
+        if !killed && (*cancel.borrow() || capped.load(std::sync::atomic::Ordering::Relaxed)) {
             let _ = child.kill();
             killed = true;
         }
         match child.try_wait() {
             Ok(Some(status)) => {
-                // 进程已退出，把管道残余读干
-                drain(&mut out, &mut stdout_buf);
-                drain(&mut err, &mut stderr_buf);
                 code = status.code();
                 break;
             }
@@ -106,6 +106,25 @@ fn wait_with_timeout_and_cancel(
             Err(_) => break,
         }
     }
+
+    // 收割残余输出（带预算；Disconnected = reader 已收尾，立即返回）
+    let collect = |rx: std::sync::mpsc::Receiver<Vec<u8>>| {
+        let start = std::time::Instant::now();
+        let mut buf = Vec::new();
+        loop {
+            let elapsed = start.elapsed();
+            if elapsed >= REAP_BUDGET {
+                break;
+            }
+            match rx.recv_timeout(REAP_BUDGET - elapsed) {
+                Ok(chunk) => buf.extend_from_slice(&chunk),
+                Err(_) => break,
+            }
+        }
+        buf
+    };
+    let stdout_buf = collect(out_rx);
+    let stderr_buf = collect(err_rx);
     (
         String::from_utf8_lossy(&stdout_buf).into_owned(),
         String::from_utf8_lossy(&stderr_buf).into_owned(),
@@ -114,25 +133,33 @@ fn wait_with_timeout_and_cancel(
     )
 }
 
-/// 读当前可用的输出（一次 read；没有数据就返回）。
-fn read_available<R: std::io::Read>(stream: &mut Option<R>, buf: &mut Vec<u8>) {
-    if let Some(s) = stream {
-        let mut chunk = [0u8; 4096];
-        if let Ok(n) = s.read(&mut chunk) {
-            if n > 0 {
-                buf.extend_from_slice(&chunk[..n]);
+/// 管道读线程：增量把字节发回主线程；单流读满上限后置位 capped
+/// （由主线程统一 kill），随后停止读取。
+fn spawn_pipe_reader<R: std::io::Read + Send + 'static>(
+    pipe: Option<R>,
+    tx: std::sync::mpsc::Sender<Vec<u8>>,
+    capped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    std::thread::spawn(move || {
+        let Some(mut s) = pipe else { return };
+        let mut total = 0usize;
+        let mut chunk = [0u8; 8192];
+        loop {
+            match s.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    total += n;
+                    if tx.send(chunk[..n].to_vec()).is_err() {
+                        break; // 主线程已放弃收割
+                    }
+                    if total >= MAX_OUTPUT_BYTES {
+                        capped.store(true, std::sync::atomic::Ordering::Relaxed);
+                        break;
+                    }
+                }
             }
         }
-    }
-}
-
-/// 进程结束后读干管道残余。
-fn drain<R: std::io::Read>(stream: &mut Option<R>, buf: &mut Vec<u8>) {
-    if let Some(s) = stream {
-        let mut chunk = Vec::new();
-        let _ = s.read_to_end(&mut chunk);
-        buf.extend_from_slice(&chunk);
-    }
+    });
 }
 
 #[async_trait::async_trait]

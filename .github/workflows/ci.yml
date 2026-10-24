@@ -88,24 +88,5 @@ jobs:
           name: mcode-x86_64-windows-msvc
           path: target/release/mcode.exe
 
-  # Windows ARM64：x64 runner 交叉，需给 VS 补 ARM64 工具集（标准 vs_installer 配方）
-  build-windows-arm64:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install MSVC ARM64 build tools
-        shell: powershell
-        run: |
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
-          $p = Start-Process -Wait -PassThru -FilePath $installer -ArgumentList 'modify','--installPath',"$vs",'--add','Microsoft.VisualStudio.Component.VC.Tools.ARM64','--quiet'
-          exit $p.ExitCode
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-pc-windows-msvc
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p mcode-cli --target aarch64-pc-windows-msvc
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mcode-aarch64-windows-msvc
-          path: target/aarch64-pc-windows-msvc/release/mcode.exe
+  # Windows ARM64 暂缓（用户指示）：vs_installer 补装步骤在 runner 上失败
+  # （PS 5.1 Start-Process 吞含空格参数的引号）。恢复时从 git 历史找回 job。

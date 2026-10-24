@@ -66,37 +66,12 @@ jobs:
         name: mcode-x86_64-windows-msvc
         path: target/release/mcode.exe
         if-no-files-found: error
-  build-windows-arm64:
-    runs-on: windows-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Install MSVC ARM64 build tools
-      shell: powershell
-      run: '$vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-
-        $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
-
-        $p = Start-Process -Wait -PassThru -FilePath $installer -ArgumentList ''modify'',''--installPath'',"$vs",''--add'',''Microsoft.VisualStudio.Component.VC.Tools.ARM64'',''--quiet''
-
-        exit $p.ExitCode'
-    - uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: aarch64-pc-windows-msvc
-    - uses: Swatinem/rust-cache@v2
-    - name: Build
-      run: cargo build --release -p mcode-cli --target aarch64-pc-windows-msvc
-    - uses: actions/upload-artifact@v4
-      with:
-        name: mcode-aarch64-windows-msvc
-        path: target/aarch64-pc-windows-msvc/release/mcode.exe
-        if-no-files-found: error
   publish:
     needs:
     - build-macos-arm64
     - build-linux-x64
     - build-linux-arm64
     - build-windows-x64
-    - build-windows-arm64
     runs-on: ubuntu-latest
     steps:
     - uses: actions/download-artifact@v4
