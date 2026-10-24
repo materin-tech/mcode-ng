@@ -288,20 +288,89 @@ fn draw_transcript(f: &mut Frame, state: &AppState, area: Rect) {
         )));
     }
 
-    // 从底部上计的滚动偏移（贴底时 0）
-    let total = lines.len() as u16;
-    let offset_from_bottom = state
-        .scroll_from_bottom
-        .unwrap_or(0)
-        .min(total.saturating_sub(1));
-    let visible_end = total.saturating_sub(offset_from_bottom);
-    let start = lines.len().saturating_sub(visible_end as usize);
-    lines.drain(0..start);
-
-    let para = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .block(Block::default().borders(Borders::NONE));
+    // 手工折行：1 逻辑行 → N 可视行（Paragraph 不再 Wrap），
+    // 折后行数与终端行一一对应，贴底/上滚窗口按可视行精确计算
+    let width = area.width.max(1) as usize;
+    let mut rows: Vec<RLine> = Vec::with_capacity(lines.len());
+    for line in &lines {
+        for row in wrap_line(&line.spans, width) {
+            rows.push(RLine::from(row));
+        }
+    }
+    let (start, end) = transcript_window(
+        rows.len(),
+        area.height as usize,
+        state.scroll_from_bottom.unwrap_or(0) as usize,
+    );
+    let view: Vec<RLine> = rows.drain(start..end).collect();
+    let para = Paragraph::new(view).block(Block::default().borders(Borders::NONE));
     f.render_widget(para, area);
+}
+
+/// transcript 视口窗口 (start, end)：贴底（offset=0）显示最后 height 行；
+/// 上滚 offset 行时视口结束于内容底部上方 offset 行。
+fn transcript_window(total: usize, height: usize, offset: usize) -> (usize, usize) {
+    let end = total.saturating_sub(offset);
+    (end.saturating_sub(height), end)
+}
+
+/// 按显示宽度把带样式行硬折成若干可视行（每行 ≤ width 列）。
+/// CJK 等宽字符按 2 列计（unicode-width）；放不进任何行的超宽单字丢弃；
+/// 行首零宽字符丢弃。折行后逻辑行与终端行一一对应。
+fn wrap_line<'a>(spans: &[Span<'a>], width: usize) -> Vec<Vec<Span<'a>>> {
+    use unicode_width::UnicodeWidthChar;
+    let width = width.max(1);
+    let mut rows: Vec<Vec<Span<'a>>> = Vec::new();
+    let mut cur: Vec<Span<'a>> = Vec::new();
+    let mut used = 0usize;
+    // 当前行内未封口的同风格 chunk（style, 文本, 宽度）——避免逐字建 Span
+    let mut open: Option<(Style, String, usize)> = None;
+
+    for span in spans {
+        let style = span.style;
+        for ch in span.content.chars() {
+            let cw = ch.width().unwrap_or(0);
+            if cw > width {
+                continue;
+            }
+            let open_w = open.as_ref().map_or(0, |(_, _, w)| *w);
+            if used + open_w + cw > width {
+                // 折行：封 chunk → 收行
+                if let Some((s, buf, _)) = open.take() {
+                    if !buf.is_empty() {
+                        cur.push(Span::styled(buf, s));
+                    }
+                }
+                rows.push(std::mem::take(&mut cur));
+                used = 0;
+                if cw == 0 {
+                    continue;
+                }
+            }
+            match &mut open {
+                Some((s, buf, w)) if *s == style => {
+                    buf.push(ch);
+                    *w += cw;
+                }
+                _ => {
+                    if let Some((s, buf, w)) = open.take() {
+                        if !buf.is_empty() {
+                            cur.push(Span::styled(buf, s));
+                        }
+                        used += w;
+                    }
+                    open = Some((style, String::from(ch), cw));
+                }
+            }
+        }
+    }
+    if let Some((s, buf, _)) = open.take() {
+        if !buf.is_empty() {
+            cur.push(Span::styled(buf, s));
+        }
+    }
+    rows.push(cur);
+    rows
 }
 
 fn draw_composer(f: &mut Frame, state: &AppState, area: Rect) {
@@ -363,4 +432,69 @@ fn draw_statusline(f: &mut Frame, state: &AppState, area: Rect) {
         Style::default().fg(Color::DarkGray),
     ));
     f.render_widget(Paragraph::new(RLine::from(spans)), area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spans_text(spans: &[Span<'_>]) -> String {
+        spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn transcript_window_pins_to_bottom() {
+        // 100 行、可视 10：贴底 = 最后 10 行
+        assert_eq!(transcript_window(100, 10, 0), (90, 100));
+        // 上滚 5：视口结束于内容底部上方 5 行
+        assert_eq!(transcript_window(100, 10, 5), (85, 95));
+        // 内容不足一屏：从头显示
+        assert_eq!(transcript_window(5, 10, 0), (0, 5));
+        // 偏移超过内容：视口清空
+        assert_eq!(transcript_window(5, 10, 50), (0, 0));
+    }
+
+    #[test]
+    fn wrap_line_hard_breaks_by_display_width() {
+        let width = 10;
+        // ASCII 30 列 → 3 行等宽
+        let rows = wrap_line(&[Span::raw("a".repeat(30))], width);
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|r| spans_text(r) == "aaaaaaaaaa"));
+
+        // CJK 每字 2 列：宽 3 下每行只装 1 字
+        let rows = wrap_line(&[Span::raw("一二三四五")], 3);
+        assert_eq!(rows.len(), 5);
+        assert_eq!(spans_text(&rows[0]), "一");
+
+        // 未超宽 → 原样 1 行；空内容 → 1 空行
+        let rows = wrap_line(&[Span::raw("hello")], 10);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(spans_text(&rows[0]), "hello");
+        assert_eq!(wrap_line(&[Span::raw("")], 10).len(), 1);
+    }
+
+    #[test]
+    fn wrap_line_preserves_styles_across_breaks() {
+        let red = Style::default().fg(Color::Red);
+        let blue = Style::default().fg(Color::Blue);
+        let spans = vec![Span::styled("aaaa", red), Span::styled("bbbb", blue)];
+
+        // 宽 4：恰好按 span 边界折成两行，样式各自保留
+        let rows = wrap_line(&spans, 4);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(spans_text(&rows[0]), "aaaa");
+        assert_eq!(spans_text(&rows[1]), "bbbb");
+        assert_eq!(rows[0][0].style.fg, Some(Color::Red));
+        assert_eq!(rows[1][0].style.fg, Some(Color::Blue));
+
+        // 宽 5：折断点落在第二个 span 内部，row0 = 红 aaaa + 蓝 b
+        let rows = wrap_line(&spans, 5);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(spans_text(&rows[0]), "aaaab");
+        assert_eq!(spans_text(&rows[1]), "bbb");
+        assert_eq!(rows[0].len(), 2, "折断行内应有两个样式段");
+        assert_eq!(rows[0][0].style.fg, Some(Color::Red));
+        assert_eq!(rows[0][1].style.fg, Some(Color::Blue));
+    }
 }
