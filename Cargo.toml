@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/mcode-core", "crates/mcode-cli"]
+members = ["crates/mcode-core", "crates/mcode-cli", "crates/mcode-ui"]
 
 [workspace.package]
 version = "0.2.0-alpha.2"
@@ -43,6 +43,11 @@ unicode-width = "0.2"
 # tui
 ratatui = "0.29"
 crossterm = "0.28"
+
+# 桌面端（GPUI；macos/windows/linux，linux 需 wayland/xkb/fontconfig 头）
+gpui = "0.2"
+unicode-segmentation = "1"
+pulldown-cmark = "0.13"
 
 # internal
 mcode-core = { path = "crates/mcode-core" }

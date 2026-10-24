@@ -1,0 +1,30 @@
+[package]
+name = "mcode-ui"
+version.workspace = true
+# 2024：GPUI 习惯 let-chains（`&& let Some(..)`），workspace 其余成员仍 2021
+edition = "2024"
+license.workspace = true
+description = "MCode 桌面端（GPUI）"
+
+[[bin]]
+name = "MCode_Desktop"
+path = "src/main.rs"
+
+[dependencies]
+gpui = { workspace = true }
+unicode-segmentation = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+pulldown-cmark = { workspace = true }
+futures = { workspace = true }
+mcode-core = { workspace = true }
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+
+[build-dependencies]
+winresource = "0.1"

@@ -1,0 +1,12 @@
+<svg width="560" height="160" viewBox="0 0 560 160" xmlns="http://www.w3.org/2000/svg">
+  <!-- MCode Desktop 品牌标：M + 终端块光标 + 字标（矢量母版） -->
+  <rect x="16" y="16" width="128" height="128" rx="36" fill="#17171A"/>
+  <path d="M 44 116 L 44 44 L 80 88 L 116 44 L 116 116"
+        fill="none" stroke="#D97757" stroke-width="13"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="128" y="94" width="11" height="22" rx="3" fill="#D97757"/>
+  <text x="170" y="78" font-family="-apple-system, Helvetica, Arial, sans-serif"
+        font-size="46" font-weight="700" fill="#E8E8EC">MCode</text>
+  <text x="170" y="118" font-family="-apple-system, Helvetica, Arial, sans-serif"
+        font-size="30" font-weight="400" fill="#6D6D78">Desktop</text>
+</svg>
