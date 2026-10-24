@@ -66,18 +66,26 @@ pub struct ConfirmPrompt {
     pub args_summary: String,
 }
 
-/// @ 文件补全弹窗。
+/// 补全弹窗（'@' 文件 / '/' 命令共用骨架）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Completion {
-    /// '@' 在 input 中的字节下标（accept 时从这里替换）。
+    /// 触发字符在 input 中的字节下标（accept 时从这里替换）。
     pub at: usize,
-    /// 候选（工作区相对路径，已按片段过滤，封顶 20 条）。
+    /// 触发字符：'@' 文件补全 / '/' 命令补全。
+    pub trigger: char,
+    /// 候选（已按片段过滤；文件封顶 20 条）。
     pub candidates: Vec<String>,
     pub selected: usize,
 }
 
 /// 候选弹窗最多显示条数。
 const MAX_COMPLETION_CANDIDATES: usize = 20;
+
+/// 弹窗一屏最多可视候选行（超出滚动跟随选中项）。
+pub(crate) const MAX_COMPLETION_VISIBLE: usize = 8;
+
+/// 内置斜杠命令（技能名由 run 层追加成完整命令表）。
+pub const BUILTIN_SLASH_COMMANDS: &[&str] = &["help", "clear", "context", "mode", "model", "quit"];
 
 /// 累计 token（Usage 事件）。
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -137,6 +145,8 @@ pub struct AppState {
     pub completion: Option<Completion>,
     /// 工作区文件清单（@ 补全数据源；启动时由 run 循环填充）。
     pub workspace_files: Vec<String>,
+    /// 斜杠命令表（内置 + 技能名；启动时由 run 循环填充）。
+    pub slash_commands: Vec<String>,
 }
 
 impl AppState {
@@ -454,20 +464,41 @@ impl AppState {
         self.workspace_files = files;
     }
 
-    /// 输入了 '@'（已是 input 最后一字节）：打开补全并出候选。
+    /// 设置斜杠命令表（内置 + 技能名，启动时调用一次）。
+    pub fn set_slash_commands(&mut self, cmds: Vec<String>) {
+        self.slash_commands = cmds;
+    }
+
+    /// 输入了 '@'（已是 input 最后一字节）：打开文件补全并出候选。
     pub fn open_completion(&mut self) {
         if self.workspace_files.is_empty() {
             return;
         }
         self.completion = Some(Completion {
             at: self.input.len().saturating_sub(1),
+            trigger: '@',
             candidates: Vec::new(),
             selected: 0,
         });
         self.refresh_completion();
     }
 
-    /// 输入变化后刷新候选：'@' 被删 / 片段含空格或新 '@' / 无匹配 → 关闭。
+    /// 输入了 '/'（位于行首）：打开命令补全弹窗。
+    pub fn open_slash_completion(&mut self) {
+        if self.slash_commands.is_empty() || self.input != "/" {
+            return;
+        }
+        self.completion = Some(Completion {
+            at: 0,
+            trigger: '/',
+            candidates: Vec::new(),
+            selected: 0,
+        });
+        self.refresh_completion();
+    }
+
+    /// 输入变化后刷新候选：触发字符被删 / 片段含空格或再次出现触发类字符 /
+    /// 无匹配 → 关闭。
     pub fn refresh_completion(&mut self) {
         let Some(c) = self.completion.as_mut() else {
             return;
@@ -475,30 +506,59 @@ impl AppState {
         if !self
             .input
             .get(c.at..)
-            .is_some_and(|rest| rest.starts_with('@'))
+            .is_some_and(|rest| rest.starts_with(c.trigger))
         {
             self.completion = None;
             return;
         }
-        // '@' 是单字节 ASCII，at+1 必是字符边界。
+        // 触发字符均为单字节 ASCII，at+1 必是字符边界。
         let fragment = self.input[c.at + 1..].to_lowercase();
         if fragment.contains(' ') || fragment.contains('@') {
             self.completion = None;
             return;
         }
-        let matched: Vec<String> = self
-            .workspace_files
-            .iter()
-            .filter(|p| p.to_lowercase().contains(&fragment))
-            .take(MAX_COMPLETION_CANDIDATES)
-            .cloned()
-            .collect();
+        let matched: Vec<String> = if c.trigger == '/' {
+            // 命令名不含 '/'：片段出现 '/' 说明已进入路径式输入，关闭
+            if fragment.contains('/') {
+                self.completion = None;
+                return;
+            }
+            self.slash_commands
+                .iter()
+                .filter(|n| n.starts_with(&fragment))
+                .cloned()
+                .collect()
+        } else {
+            self.workspace_files
+                .iter()
+                .filter(|p| p.to_lowercase().contains(&fragment))
+                .take(MAX_COMPLETION_CANDIDATES)
+                .cloned()
+                .collect()
+        };
         if matched.is_empty() {
             self.completion = None;
         } else {
             c.candidates = matched;
             c.selected = 0;
         }
+    }
+
+    /// 当前滚动窗口 (start, len)：候选超过一屏时窗口跟随选中项。
+    pub fn completion_window(&self) -> (usize, usize) {
+        let Some(c) = &self.completion else {
+            return (0, 0);
+        };
+        let len = c.candidates.len().min(MAX_COMPLETION_VISIBLE);
+        if len == 0 {
+            return (0, 0);
+        }
+        let start = if c.selected + 1 > len {
+            (c.selected + 1 - len).min(c.candidates.len() - len)
+        } else {
+            0
+        };
+        (start, len)
     }
 
     /// 候选上下移动（环绕）。
@@ -513,12 +573,12 @@ impl AppState {
         c.selected = (c.selected as i32 + delta).rem_euclid(len) as usize;
     }
 
-    /// 接受当前候选：`@frag` → `@path␣`。返回接受的路径。
+    /// 接受当前候选：`@frag` → `@path␣`（斜杠命令同理）。返回接受的候选。
     pub fn accept_completion(&mut self) -> Option<String> {
         let c = self.completion.take()?;
         let path = c.candidates.get(c.selected)?.clone();
         let head = self.input[..c.at].to_string();
-        self.input = format!("{head}@{path} ");
+        self.input = format!("{head}{}{path} ", c.trigger);
         Some(path)
     }
 
@@ -846,5 +906,79 @@ mod tests {
         assert_eq!(picked, "docs/guide.md");
         assert_eq!(t.input, "看下 @docs/guide.md ");
         assert!(t.completion.is_none());
+    }
+
+    #[test]
+    fn completion_window_scrolls_to_keep_selection_visible() {
+        let mut s = AppState::default();
+        let files: Vec<String> = (0..30).map(|i| format!("dir/file{i:02}.txt")).collect();
+        s.set_workspace_files(files);
+        s.input = "@".into();
+        s.open_completion();
+        // 候选封顶 20（refresh 截断），一屏可视 8
+        let n = s.completion.as_ref().unwrap().candidates.len();
+        assert_eq!(n, 20);
+        assert_eq!(s.completion_window(), (0, 8), "开窗默认顶部");
+
+        for _ in 0..10 {
+            s.completion_move(1);
+        }
+        assert_eq!(s.completion.as_ref().unwrap().selected, 10);
+        assert_eq!(s.completion_window(), (3, 8), "选中下移时窗口跟随");
+
+        for _ in 0..9 {
+            s.completion_move(1);
+        }
+        assert_eq!(s.completion.as_ref().unwrap().selected, 19, "移到末尾");
+        assert_eq!(s.completion_window(), (12, 8), "选中到底部时窗口贴底钳制");
+    }
+
+    #[test]
+    fn slash_completion_lists_filters_and_accepts_commands() {
+        let mut s = AppState::default();
+        s.set_slash_commands(vec![
+            "help".into(),
+            "clear".into(),
+            "context".into(),
+            "mode".into(),
+            "model".into(),
+        ]);
+
+        // 敲 '/' 打开 → 全量命令（保持插入序）
+        s.input = "/".into();
+        s.open_slash_completion();
+        let c = s.completion.as_ref().expect("斜杠弹窗打开");
+        assert_eq!(c.trigger, '/');
+        assert_eq!(c.at, 0);
+        assert_eq!(
+            c.candidates,
+            vec!["help", "clear", "context", "mode", "model"]
+        );
+
+        // 继续敲 "mo" → 前缀过滤
+        s.input = "/mo".into();
+        s.refresh_completion();
+        assert_eq!(
+            s.completion.as_ref().unwrap().candidates,
+            vec!["mode", "model"]
+        );
+
+        // 接受 → "/mode "，弹窗消费
+        s.accept_completion();
+        assert_eq!(s.input, "/mode ");
+        assert!(s.completion.is_none());
+
+        // 进参数（片段含空格）→ 关闭，不再干扰（真实流程：弹窗已开，逐键输入刷新）
+        s.input = "/".into();
+        s.open_slash_completion();
+        assert!(s.completion.is_some());
+        s.input = "/model g".into();
+        s.refresh_completion();
+        assert!(s.completion.is_none(), "片段含空格应关闭");
+
+        // 无匹配 → 不开窗
+        s.input = "/zzz".into();
+        s.open_slash_completion();
+        assert!(s.completion.is_none(), "无匹配候选不开窗");
     }
 }

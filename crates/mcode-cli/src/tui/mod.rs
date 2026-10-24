@@ -358,6 +358,12 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
         ..Default::default()
     };
     state.set_workspace_files(complete::collect_workspace_files(&cwd));
+    let mut cmds: Vec<String> = state::BUILTIN_SLASH_COMMANDS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    cmds.extend(rt.skills.names());
+    state.set_slash_commands(cmds);
     rt.deps.perms.lock().await.set_mode(state.mode);
     for l in replay {
         state.lines.push(l);
@@ -648,11 +654,15 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
                                 None => {}
                             },
                             _ => {
-                                if render::on_key(&mut state, k)
-                                    && matches!(k.code, KeyCode::Char('@'))
-                                {
-                                    // 刚敲进 '@' → 打开文件补全（弹窗接管后续按键）
-                                    state.open_completion();
+                                if render::on_key(&mut state, k) {
+                                    match k.code {
+                                        // 刚敲进 '@' → 文件补全；行首 '/' → 命令补全
+                                        KeyCode::Char('@') => state.open_completion(),
+                                        KeyCode::Char('/') if state.input == "/" => {
+                                            state.open_slash_completion();
+                                        }
+                                        _ => {}
+                                    }
                                 }
                             }
                         }

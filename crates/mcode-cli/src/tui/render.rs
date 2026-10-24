@@ -96,15 +96,21 @@ pub fn draw(f: &mut Frame, state: &AppState) {
     draw_overlays(f, state, f.area());
 }
 
-/// @ 文件补全弹窗：贴在 composer 上沿，盖住 transcript 底部。
+/// 补全弹窗（'@' 文件 / '/' 命令）：贴在 composer 上沿，盖住 transcript 底部。
+/// 候选超过一屏时按 state.completion_window 滚动，选中项始终可见。
 fn draw_completion(f: &mut Frame, state: &AppState, area: Rect) {
     let Some(c) = &state.completion else { return };
-    let mut lines: Vec<RLine> = c
-        .candidates
+    let (start, win) = state.completion_window();
+    // 高度预算：候选行 + 提示行 + 上下边框；终端过矮时再裁可视行数
+    let vis = win.min(area.height.saturating_sub(3) as usize);
+    if vis == 0 {
+        return;
+    }
+    let mut lines: Vec<RLine> = c.candidates[start..start + vis]
         .iter()
         .enumerate()
         .map(|(i, p)| {
-            let style = if i == c.selected {
+            let style = if start + i == c.selected {
                 Style::default().bg(Color::Blue).fg(Color::White)
             } else {
                 Style::default()
@@ -116,8 +122,13 @@ fn draw_completion(f: &mut Frame, state: &AppState, area: Rect) {
         "↑↓ 选择 · Tab/Enter 补全 · Esc 关闭",
         Style::default().fg(Color::DarkGray),
     )));
+    let title = if c.trigger == '@' {
+        " @ 文件 "
+    } else {
+        " 命令 "
+    };
     let w = 52.min(area.width);
-    let h = (lines.len() as u16 + 2).min(area.height).min(10);
+    let h = (vis as u16 + 3).min(area.height);
     let box_area = Rect {
         x: area.x,
         y: area.bottom().saturating_sub(h),
@@ -131,7 +142,7 @@ fn draw_completion(f: &mut Frame, state: &AppState, area: Rect) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan))
                 .title(Span::styled(
-                    " @ 文件 ",
+                    title,
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
