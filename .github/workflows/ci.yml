@@ -1,92 +1,107 @@
 name: ci
-on:
-  push:
-    branches: [main]
-  pull_request:
-
 jobs:
-  # 静态检查单跑一槽（三平台重复 lint 无增益）
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-
-  # 三平台原生跑全量测试：cfg(windows)/cfg(unix) 路径只有原生 runner 能真正执行
-  # （macos-latest = Apple Silicon；windows-latest = x64 MSVC）
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo fmt --all -- --check
+    - run: cargo clippy --workspace --all-targets -- -D warnings
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os:
+        - macos-latest
+        - ubuntu-latest
+        - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
-
-  # ---- 发布产物：macos arm / linux arm+x86 (musl) / windows arm+x86 (msvc) ----
-
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - name: cargo test --workspace (unix)
+      if: runner.os != 'Windows'
+      run: cargo test --workspace
+    - name: cargo test --workspace (windows, per-binary timeout)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: "$ErrorActionPreference = 'Stop'\n# 编译期单独可见（这一步可能占大头；job 能完成，缓存才落得下）\n\
+        cargo test --workspace --no-run\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE\
+        \ }\n# 抓测试二进制清单（增量，秒回）\n$bins = cargo test --workspace --no-run --message-format=json\
+        \ 2>$null |\n  Where-Object { $_ -like '{%' } | ForEach-Object { $_ | ConvertFrom-Json\
+        \ } |\n  Where-Object { $_.executable -and $_.profile.test } |\n  Select-Object\
+        \ -Unique -ExpandProperty executable\nWrite-Host \"test binaries: $($bins.Count)\"\
+        \n# 逐二进制跑：单个 8 分钟封顶，超时即杀进程树并让 job 变红点名\nforeach ($b in $bins) {\n  Write-Host\
+        \ \">>> RUNNING $b\"\n  $so = New-TemporaryFile; $se = New-TemporaryFile\n\
+        \  $p = Start-Process -FilePath $b -ArgumentList '--test-threads=2' -NoNewWindow\
+        \ -PassThru `\n        -RedirectStandardOutput $so.FullName -RedirectStandardError\
+        \ $se.FullName\n  if (-not $p.WaitForExit(480000)) {\n    try { $p.Kill($true)\
+        \ } catch { $p.Kill() }\n    Write-Host \"!!! TIMEOUT(8min): $b\"\n    Write-Host\
+        \ '--- stdout ---'; Get-Content $so.FullName | ForEach-Object { Write-Host\
+        \ $_ }\n    Write-Host '--- stderr ---'; Get-Content $se.FullName | ForEach-Object\
+        \ { Write-Host $_ }\n    exit 1\n  }\n  Get-Content $so.FullName | ForEach-Object\
+        \ { Write-Host $_ }\n  Get-Content $se.FullName | ForEach-Object { Write-Host\
+        \ $_ }\n  if ($p.ExitCode -ne 0) { exit $p.ExitCode }\n}\nWrite-Host 'ALL\
+        \ BINARIES DONE'\n"
   build-macos-arm64:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p mcode-cli
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mcode-aarch64-apple-darwin
-          path: target/release/mcode
-
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo build --release -p mcode-cli
+    - uses: actions/upload-artifact@v4
+      with:
+        name: mcode-aarch64-apple-darwin
+        path: target/release/mcode
   build-linux-x64-musl:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p mcode-cli --target x86_64-unknown-linux-musl
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mcode-x86_64-linux-musl
-          path: target/x86_64-unknown-linux-musl/release/mcode
-
-  # GitHub 原生 arm64 linux runner：musl-tools 直出，免交叉工具链
+    - uses: actions/checkout@v4
+    - run: sudo apt-get update && sudo apt-get install -y musl-tools
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: x86_64-unknown-linux-musl
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo build --release -p mcode-cli --target x86_64-unknown-linux-musl
+    - uses: actions/upload-artifact@v4
+      with:
+        name: mcode-x86_64-linux-musl
+        path: target/x86_64-unknown-linux-musl/release/mcode
   build-linux-arm64-musl:
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p mcode-cli --target aarch64-unknown-linux-musl
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mcode-aarch64-linux-musl
-          path: target/aarch64-unknown-linux-musl/release/mcode
-
+    - uses: actions/checkout@v4
+    - run: sudo apt-get update && sudo apt-get install -y musl-tools
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-unknown-linux-musl
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo build --release -p mcode-cli --target aarch64-unknown-linux-musl
+    - uses: actions/upload-artifact@v4
+      with:
+        name: mcode-aarch64-linux-musl
+        path: target/aarch64-unknown-linux-musl/release/mcode
   build-windows-x64:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p mcode-cli
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mcode-x86_64-windows-msvc
-          path: target/release/mcode.exe
-
-  # Windows ARM64 暂缓（用户指示）：vs_installer 补装步骤在 runner 上失败
-  # （PS 5.1 Start-Process 吞含空格参数的引号）。恢复时从 git 历史找回 job。
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo build --release -p mcode-cli
+    - uses: actions/upload-artifact@v4
+      with:
+        name: mcode-x86_64-windows-msvc
+        path: target/release/mcode.exe
+'on':
+  push:
+    branches:
+    - main
+  pull_request: null
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
