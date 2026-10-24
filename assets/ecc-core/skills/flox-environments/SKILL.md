@@ -467,7 +467,7 @@ flox edit -f "$tmp_manifest"
 flox activate -- jq '.results[]' data.json
 ```
 
-This makes Flox a natural fit for any workflow where Claude Code or other AI agents need to bootstrap project tooling on the fly.
+This makes Flox a natural fit for any workflow where MCode or other AI agents need to bootstrap project tooling on the fly.
 
 ## Debugging
 
@@ -486,7 +486,7 @@ flox search <package> --all       # Broader package search (case-sensitive)
 
 ## Related Skills
 
-The following skills are available as part of the [Flox Claude Code plugin](https://github.com/flox/flox-agentic) for deeper integration:
+The following skills are available as part of the [Flox MCode plugin](https://github.com/flox/flox-agentic) for deeper integration:
 
 - **flox-services** — Service management, database setup, background processes
 - **flox-builds** — Reproducible builds and packaging with Flox

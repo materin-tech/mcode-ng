@@ -1,6 +1,6 @@
 ---
 name: configure-ecc
-description: "Run the conversational ECC setup wizard inside the current harness: inventory the install, collect scope (user/project/local) and hook mode (off/minimal/standard/strict) in Claude Code, use Codex's native plugin lifecycle, or install the project surface under ./.kimi-code, then preview, apply, and verify. Use when installing, updating, reconfiguring, or repairing an ECC installation, changing hook profiles, or moving ECC between install scopes."
+description: "Run the conversational ECC setup wizard inside the current harness: inventory the install, collect scope (user/project/local) and hook mode (off/minimal/standard/strict) in MCode, use Codex's native plugin lifecycle, or install the project surface under ./.kimi-code, then preview, apply, and verify. Use when installing, updating, reconfiguring, or repairing an ECC installation, changing hook profiles, or moving ECC between install scopes."
 metadata:
   origin: ECC
 ---
@@ -18,18 +18,18 @@ commands below instead.
 
 ## Route by the current harness
 
-- In Claude Code, use the full scope-and-hook wizard below.
-- In Codex, use Codex's native plugin lifecycle. Do not offer Claude scopes or
-  map ECC's four Claude hook profiles onto Codex.
+- In MCode, use the full scope-and-hook wizard below.
+- In Codex, use Codex's native plugin lifecycle. Do not offer MCode scopes or
+  map ECC's four MCode hook profiles onto Codex.
 - In Kimi, install the project surface under `./.kimi-code`. Kimi does not
-  provide ECC's Claude lifecycle-hook profiles.
+  provide ECC's MCode lifecycle-hook profiles.
 - If the harness is uncertain, state the detected evidence and ask which
   harness to configure before running a mutating command.
 
 This skill is a post-install reconfiguration path. It cannot intercept or
 replace a provider's built-in first-install UI.
 
-## Claude Code: run the full conversational wizard
+## MCode: run the full conversational wizard
 
 ### 1. Inventory without changing anything
 
@@ -37,12 +37,12 @@ Run both commands and summarize the installed ECC scope, enabled state, and
 marketplace source:
 
 ```bash
-claude plugin list --json
-claude plugin marketplace list --json
+mcode plugin list --json
+mcode plugin marketplace list --json
 ```
 
 Treat a single existing `ecc@ecc` installation as a reconfiguration. Do not
-interpret Claude's provider-owned "Open home page" control as installation
+interpret MCode's provider-owned "Open home page" control as installation
 evidence. Stop and report the recovery returned by setup for multiple ECC
 scopes, a legacy/manual install, malformed settings, or a marketplace collision;
 never guess which state to delete.
@@ -68,7 +68,7 @@ Ask exactly one hook-mode question and require one value:
 - `standard` balances quality and safety automation.
 - `strict` enables the strongest checks and reminders.
 
-Hook preference is personal Claude plugin configuration; it does not follow
+Hook preference is personal MCode plugin configuration; it does not follow
 the selected install scope.
 
 ### 3. Preview and confirm once
@@ -77,14 +77,14 @@ Prefer the plugin-bundled setup script. Substitute the two selected values and
 include `--move-scope` only for a scope migration:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/scripts/setup.js" --mode claude-plugin \
+node "$MCODE_PLUGIN_ROOT/scripts/setup.js" --mode mcode-plugin \
   --scope <scope> --hooks <hooks> [--move-scope] --dry-run --json
 ```
 
-If `$CLAUDE_PLUGIN_ROOT` is unavailable, use the published npm package:
+If `$MCODE_PLUGIN_ROOT` is unavailable, use the published npm package:
 
 ```bash
-npx --yes --package ecc-universal ecc setup --mode claude-plugin \
+npx --yes --package ecc-universal ecc setup --mode mcode-plugin \
   --scope <scope> --hooks <hooks> [--move-scope] --dry-run --json
 ```
 
@@ -99,14 +99,14 @@ After confirmation, rerun the same route without `--dry-run`. Keep every choice
 explicit and request JSON so success can be checked deterministically:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/scripts/setup.js" --mode claude-plugin \
+node "$MCODE_PLUGIN_ROOT/scripts/setup.js" --mode mcode-plugin \
   --scope <scope> --hooks <hooks> [--move-scope] --yes --json
 ```
 
 Fallback:
 
 ```bash
-npx --yes --package ecc-universal ecc setup --mode claude-plugin \
+npx --yes --package ecc-universal ecc setup --mode mcode-plugin \
   --scope <scope> --hooks <hooks> [--move-scope] --yes --json
 ```
 
@@ -116,11 +116,11 @@ Require a zero exit status and a setup result whose `scope` and `hooks` equal
 the selected values. Then independently run:
 
 ```bash
-claude plugin list --json
+mcode plugin list --json
 ```
 
 Continue only when exactly one enabled `ecc@ecc` entry exists at the selected
-scope. When `$CLAUDE_PLUGIN_ROOT` is available, pass the successful setup
+scope. When `$MCODE_PLUGIN_ROOT` is available, pass the successful setup
 `action` (`installed`, `updated`, `migrated`, `resumed`, or
 `already-migrated`) to the bundled renderer:
 
@@ -129,21 +129,21 @@ Before invoking it, require the provider-reported version to match
 version text instead of interpolating it into a shell command.
 
 ```bash
-node -e 'const { renderTerminalWelcome } = require(process.env.CLAUDE_PLUGIN_ROOT + "/scripts/lib/terminal-welcome"); process.stdout.write(renderTerminalWelcome({ action: process.argv[1], version: process.argv[2], color: process.stdout.isTTY }));' "<action>" "<installed-version>"
+node -e 'const { renderTerminalWelcome } = require(process.env.MCODE_PLUGIN_ROOT + "/scripts/lib/terminal-welcome"); process.stdout.write(renderTerminalWelcome({ action: process.argv[1], version: process.argv[2], color: process.stdout.isTTY }));' "<action>" "<installed-version>"
 ```
 
 Render the welcome exactly once. On failure, dry-run, cancellation, a scope or
 hook mismatch, or unverifiable state, do not render it; report the error and
 recovery instead. After verified changes, tell the user to run
-`/reload-plugins` or restart Claude Code.
+`/reload-plugins` or restart MCode.
 
 ## Codex: use the native plugin lifecycle
 
 Inventory with `codex plugin marketplace list --json` and
 `codex plugin list --available --json`. Codex's native plugin command has no
-Claude-style `user | project | local` selector. Codex native plugins do support
+MCode-style `user | project | local` selector. Codex native plugins do support
 provider-specific hooks, but Codex requires explicit trust for them. Let Codex
-show that trust decision; do not ask the Claude four-profile hook question or
+show that trust decision; do not ask the MCode four-profile hook question or
 claim those profiles map to Codex.
 
 If the ECC marketplace is missing, add it. Otherwise refresh its snapshot:
@@ -176,14 +176,14 @@ a tool API invocation, not a shell command:
 If the current harness cannot invoke an executable with a separate argument
 array, skip the welcome. Never construct a shell command from Codex JSON values.
 
-Never claim that Claude's `off | minimal | standard | strict` profiles were
+Never claim that MCode's `off | minimal | standard | strict` profiles were
 applied to Codex.
 
 ## Kimi: install the project surface
 
 State the capability summary before confirmation: destination
 `./.kimi-code`; `hooks=unsupported` for ECC lifecycle hooks. Do not ask the
-Claude scope or hook-mode questions. Preview first:
+MCode scope or hook-mode questions. Preview first:
 
 ```bash
 npx --yes --package ecc-universal ecc install --profile core --target kimi --dry-run

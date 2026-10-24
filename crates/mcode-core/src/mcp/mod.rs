@@ -63,7 +63,7 @@ impl McpManager {
     }
 
     /// 刷新工具目录：逐 server list_tools；失败的 server 记警告不拖垮整体
-    /// （CC 语义：单个 MCP server 挂了只影响自己，其余照常可用）。
+    /// （单个 MCP server 挂了只影响自己，其余照常可用）。
     pub async fn refresh_tools(&self) -> (Vec<McpToolInfo>, Vec<String>) {
         let mut tools = Vec::new();
         let mut warnings = Vec::new();

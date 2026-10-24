@@ -54,7 +54,7 @@ Version 1 is executed by the current session. It does not add a dedicated agent,
 Read artifacts only when they exist:
 
 1. The existing test registry and `templates/TESTS.example.md`.
-2. Project rules and maps, such as `CLAUDE.md`, `AGENTS.md`, and `CLAUDE_MAP.md`.
+2. Project rules and maps, such as `MCODE.md`, `AGENTS.md`, and `MCODE_MAP.md`.
 3. Test directories, test configuration, CI configuration, standard runners, and specialized suites.
 4. Specs, bugs, Issues, audits, incidents, and regression ledgers. Link success criteria; do not copy them.
 5. The regression ledger, to align module commands with TEST-IDs.

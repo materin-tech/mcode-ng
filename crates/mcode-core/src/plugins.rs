@@ -1,6 +1,6 @@
 //! plugins：`.mcode-plugin/plugin.json` 插件清单的加载与目录组合。
 //!
-//! 对齐 CC 插件体系核心语义（清单字段参考其 PluginManifestSchema）：
+//! 插件体系核心语义（清单字段兼容既有 PluginManifestSchema）：
 //! - 插件 = 一个含 `.mcode-plugin/plugin.json` 的目录；
 //! - `name` 必填且 kebab-case（小写字母/数字，`-` 分隔，无空格）；
 //!   非法清单的插件跳过，不拖垮整体加载；
@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// 清单里的 author 字段：CC 允许纯字符串或 `{name, email, url}` 详情。
+/// 清单里的 author 字段：允许纯字符串或 `{name, email, url}` 详情。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Author {

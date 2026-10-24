@@ -107,15 +107,15 @@ Use managed install paths:
 
 ```bash
 node scripts/install-plan.js --list-profiles
-node scripts/install-plan.js --profile minimal --target claude --json
-node scripts/install-apply.js --profile minimal --target claude --dry-run
+node scripts/install-plan.js --profile minimal --target mcode --json
+node scripts/install-apply.js --profile minimal --target mcode --dry-run
 ```
 
 For specific skill installs:
 
 ```bash
-node scripts/install-plan.js --skills <skill-id> --target claude --json
-node scripts/install-apply.js --skills <skill-id> --target claude --dry-run
+node scripts/install-plan.js --skills <skill-id> --target mcode --json
+node scripts/install-apply.js --skills <skill-id> --target mcode --dry-run
 ```
 
 Warn users not to stack plugin installs and full manual/profile installs unless they intentionally want duplicate surfaces.
@@ -126,7 +126,7 @@ Use `/project-init` when the user wants ECC configured for a target repo. The ex
 
 1. detect the stack from project files
 2. resolve a dry-run install plan
-3. inspect existing `CLAUDE.md` and settings files
+3. inspect existing `MCODE.md` and settings files
 4. ask before applying changes
 5. keep generated guidance minimal and repo-specific
 
@@ -135,7 +135,7 @@ Use `/project-init` when the user wants ECC configured for a target repo. The ex
 Ask for the target harness and install path first, then inspect:
 
 - plugin install metadata
-- `.claude/`, `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.codebuddy/`, `.joycode/`, or `.qwen/`
+- `.mcode/`, `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.codebuddy/`, `.joycode/`, or `.qwen/`
 - `hooks/hooks.json`
 - install-state files
 - relevant command/skill files
@@ -187,4 +187,4 @@ Needs approval before apply: <yes/no>
 - `/harness-audit`: deterministic readiness scorecard
 - `/skill-health`: skill quality review
 - `/skill-create`: generate a new skill from local git history
-- `/security-scan`: inspect Claude/OpenCode configuration security
+- `/security-scan`: inspect MCode/OpenCode configuration security

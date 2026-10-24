@@ -1,6 +1,6 @@
 //! skills：`<name>/SKILL.md` 技能定义的加载、注册与 `skill` 工具。
 //!
-//! 对齐 CC 的技能体系核心语义：
+//! 技能体系核心语义：
 //! - 目录格式 `<skills-dir>/<name>/SKILL.md`（不支持裸 .md 文件），
 //!   技能名 = 目录名（frontmatter name 只是校验/展示）；
 //! - 来源分层：`~/.mcode/skills`（用户）→ `.mcode/skills`（项目覆盖）→
@@ -96,7 +96,7 @@ impl SkillRegistry {
             entries.sort();
             for entry in entries {
                 if !entry.is_dir() {
-                    continue; // 裸文件不支持（对齐 CC）
+                    continue; // 裸文件不支持
                 }
                 let skill_file = entry.join("SKILL.md");
                 let Ok(src) = std::fs::read_to_string(&skill_file) else {

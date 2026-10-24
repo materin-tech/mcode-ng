@@ -1,13 +1,13 @@
 ---
 name: skill-stocktake
-description: "Use when auditing Claude skills and commands for quality. Supports Quick Scan (changed skills only) and Full Stocktake modes with sequential subagent batch evaluation."
+description: "Use when auditing MCode skills and commands for quality. Supports Quick Scan (changed skills only) and Full Stocktake modes with sequential subagent batch evaluation."
 metadata:
   origin: ECC
 ---
 
 # skill-stocktake
 
-Slash command (`/skill-stocktake`) that audits all Claude skills and commands using a quality checklist + AI holistic judgment. Supports two modes: Quick Scan for recently changed skills, and Full Stocktake for a complete review.
+Slash command (`/skill-stocktake`) that audits all MCode skills and commands using a quality checklist + AI holistic judgment. Supports two modes: Quick Scan for recently changed skills, and Full Stocktake for a complete review.
 
 ## Scope
 
@@ -15,8 +15,8 @@ The command targets the following paths **relative to the directory where it is 
 
 | Path | Description |
 |------|-------------|
-| `~/.claude/skills/` | Global skills (all projects) |
-| `{cwd}/.claude/skills/` | Project-level skills (if the directory exists) |
+| `~/.mcode/skills/` | Global skills (all projects) |
+| `{cwd}/.mcode/skills/` | Project-level skills (if the directory exists) |
 
 **At the start of Phase 1, the command explicitly lists which paths were found and scanned.**
 
@@ -31,7 +31,7 @@ cd ~/path/to/my-project
 /skill-stocktake
 ```
 
-If the project has no `.claude/skills/` directory, only global skills and commands are evaluated.
+If the project has no `.mcode/skills/` directory, only global skills and commands are evaluated.
 
 ## Modes
 
@@ -42,22 +42,22 @@ If the project has no `.claude/skills/` directory, only global skills and comman
 
 The shell scripts require Bash, Node.js, and `jq` on `PATH`.
 
-**Results cache:** `~/.claude/skills/skill-stocktake/results.json`
+**Results cache:** `~/.mcode/skills/skill-stocktake/results.json`
 
 ## Quick Scan Flow
 
 Re-evaluate only skills that have changed since the last run (5–10 min).
 
-1. Read `~/.claude/skills/skill-stocktake/results.json`
-2. Run: `bash ~/.claude/skills/skill-stocktake/scripts/quick-diff.sh \
-         ~/.claude/skills/skill-stocktake/results.json`
-   (Project dir is auto-detected from `$PWD/.claude/skills`; pass it explicitly only if needed)
+1. Read `~/.mcode/skills/skill-stocktake/results.json`
+2. Run: `bash ~/.mcode/skills/skill-stocktake/scripts/quick-diff.sh \
+         ~/.mcode/skills/skill-stocktake/results.json`
+   (Project dir is auto-detected from `$PWD/.mcode/skills`; pass it explicitly only if needed)
 3. If output is `[]`: report "No changes since last run." and stop
 4. Re-evaluate only those changed files using the same Phase 2 criteria
 5. Carry forward unchanged skills from previous results
 6. Output only the diff
-7. Run: `bash ~/.claude/skills/skill-stocktake/scripts/save-results.sh \
-         ~/.claude/skills/skill-stocktake/results.json <<< "$EVAL_RESULTS"`
+7. Run: `bash ~/.mcode/skills/skill-stocktake/scripts/save-results.sh \
+         ~/.mcode/skills/skill-stocktake/results.json <<< "$EVAL_RESULTS"`
 
 ## Full Stocktake Flow
 
@@ -68,9 +68,9 @@ Run this entire block in **one Bash invocation**. It prints the inventory for th
 ```bash
 (
   set -euo pipefail
-  SCAN_JSON=$(bash ~/.claude/skills/skill-stocktake/scripts/scan.sh)
+  SCAN_JSON=$(bash ~/.mcode/skills/skill-stocktake/scripts/scan.sh)
   printf '%s\n' "$SCAN_JSON"
-  RESULTS_JSON=~/.claude/skills/skill-stocktake/results.json
+  RESULTS_JSON=~/.mcode/skills/skill-stocktake/results.json
 
   CACHE_STATUS=""
   if [[ -f "$RESULTS_JSON" ]]; then
@@ -92,33 +92,33 @@ Run this entire block in **one Bash invocation**. It prints the inventory for th
           evaluated: (.skills | length), status: "in_progress"
         }
     ' <<< "$SCAN_JSON")
-    bash ~/.claude/skills/skill-stocktake/scripts/save-results.sh \
+    bash ~/.mcode/skills/skill-stocktake/scripts/save-results.sh \
       "$RESULTS_JSON" --replace <<< "$RESUMED_RESULTS"
   else
     INITIAL_RESULTS=$(printf '%s\n' "$SCAN_JSON" | jq '{
       mode: "full", skills: {},
       batch_progress: {total: (.skills | length), evaluated: 0, status: "in_progress"}
     }')
-    bash ~/.claude/skills/skill-stocktake/scripts/save-results.sh \
+    bash ~/.mcode/skills/skill-stocktake/scripts/save-results.sh \
       "$RESULTS_JSON" --replace <<< "$INITIAL_RESULTS"
   fi
 )
 ```
 
 The script enumerates skill files, extracts frontmatter, and collects UTC mtimes.
-Project dir is auto-detected from `$PWD/.claude/skills`; pass it explicitly only if needed.
+Project dir is auto-detected from `$PWD/.mcode/skills`; pass it explicitly only if needed.
 Present the scan summary and inventory table from the script output:
 
 ```
 Scanning:
-  ✓ ~/.claude/skills/         (17 files)
-  ✗ {cwd}/.claude/skills/    (not found — global skills only)
+  ✓ ~/.mcode/skills/         (17 files)
+  ✗ {cwd}/.mcode/skills/    (not found — global skills only)
 ```
 
 | Skill | 7d use | 30d use | Description |
 |-------|--------|---------|-------------|
 
-Usage counts come from the optional `~/.claude/observations.jsonl` file (overridable with `SKILL_STOCKTAKE_OBSERVATIONS`), which Claude Code does not create by default. When the file is absent, `use_7d` and `use_30d` are JSON `null`; display them as **unmeasured** in inventory and summary tables. A numeric `0` means the file exists but contains no matching Read observations in that window. Missing usage data is never evidence for retiring a skill.
+Usage counts come from the optional `~/.mcode/observations.jsonl` file (overridable with `SKILL_STOCKTAKE_OBSERVATIONS`), which MCode does not create by default. When the file is absent, `use_7d` and `use_30d` are JSON `null`; display them as **unmeasured** in inventory and summary tables. A numeric `0` means the file exists but contains no matching Read observations in that window. Missing usage data is never evidence for retiring a skill.
 
 `--replace` writes a complete cache snapshot. A new run starts with an empty evaluation; a resumed run instead keeps a saved evaluation only when its path is still live and its saved, non-null mtime matches the fresh inventory. Changed skills and entries without an mtime require re-evaluation. It removes archived/deleted entries and refreshes the progress counts even when no new batch remains. Existing name-keyed entries are normalized using their saved `path`. Never use the empty initialization payload for a resume. Later chunks, completion updates, and Quick Scans must omit `--replace` so they merge into the current run instead of losing earlier results.
 
@@ -131,8 +131,8 @@ The subagent reads each assigned skill, applies the checklist, and returns a JSO
 **Chunk guidance:** Process ~20 skills per subagent invocation to keep context manageable. After each chunk, wrap its returned `skills` map with `mode: "full"` and `batch_progress: {total, evaluated, status: "in_progress"}`. Set `total` to the inventory size and `evaluated` to the cumulative number of distinct evaluated paths, including saved batches. Assign this JSON to `CHUNK_RESULTS` and run the following command in the **same Bash invocation as that assignment**:
 
 ```bash
-bash ~/.claude/skills/skill-stocktake/scripts/save-results.sh \
-  ~/.claude/skills/skill-stocktake/results.json <<< "$CHUNK_RESULTS"
+bash ~/.mcode/skills/skill-stocktake/scripts/save-results.sh \
+  ~/.mcode/skills/skill-stocktake/results.json <<< "$CHUNK_RESULTS"
 ```
 
 After all skills are evaluated, persist completion before proceeding to Phase 3:
@@ -140,7 +140,7 @@ After all skills are evaluated, persist completion before proceeding to Phase 3:
 ```bash
 (
   set -euo pipefail
-  RESULTS_JSON=~/.claude/skills/skill-stocktake/results.json
+  RESULTS_JSON=~/.mcode/skills/skill-stocktake/results.json
   COMPLETED_RESULTS=$(jq -e '
     if (.skills | length) == .batch_progress.total then
       {skills: {}, mode: "full", batch_progress: (.batch_progress + {
@@ -148,7 +148,7 @@ After all skills are evaluated, persist completion before proceeding to Phase 3:
       })}
     else error("Inventory still has unevaluated skills") end
   ' "$RESULTS_JSON")
-  bash ~/.claude/skills/skill-stocktake/scripts/save-results.sh \
+  bash ~/.mcode/skills/skill-stocktake/scripts/save-results.sh \
     "$RESULTS_JSON" <<< "$COMPLETED_RESULTS"
 )
 ```
@@ -159,7 +159,7 @@ Each skill is evaluated against this checklist:
 
 ```
 - [ ] Content overlap with other skills checked
-- [ ] Overlap with MEMORY.md / CLAUDE.md checked
+- [ ] Overlap with MEMORY.md / MCODE.md checked
 - [ ] Freshness of technical references verified (use WebSearch if tool names / CLI flags / APIs are present)
 - [ ] Usage frequency considered when measured; missing observations marked unmeasured, not treated as zero
 ```
@@ -177,7 +177,7 @@ Verdict criteria:
 Evaluation is **holistic AI judgment** — not a numeric rubric. Guiding dimensions:
 - **Actionability**: code examples, commands, or steps that let you act immediately
 - **Scope fit**: name, trigger, and content are aligned; not too broad or narrow
-- **Uniqueness**: value not replaceable by MEMORY.md / CLAUDE.md / another skill
+- **Uniqueness**: value not replaceable by MEMORY.md / MCODE.md / another skill
 - **Currency**: technical references work in the current environment
 
 **Reason quality requirements** — the `reason` field must be self-contained and decision-enabling:
@@ -214,7 +214,7 @@ Evaluation is **holistic AI judgment** — not a numeric rubric. Guiding dimensi
 
 ## Results File Schema
 
-`~/.claude/skills/skill-stocktake/results.json`:
+`~/.mcode/skills/skill-stocktake/results.json`:
 
 **`evaluated_at`**: Must be set to the actual UTC time of evaluation completion.
 Obtain via Bash: `date -u +%Y-%m-%dT%H:%M:%SZ`. Never use a date-only approximation like `T00:00:00Z`.
@@ -229,8 +229,8 @@ Obtain via Bash: `date -u +%Y-%m-%dT%H:%M:%SZ`. Never use a date-only approximat
     "status": "completed"
   },
   "skills": {
-    "~/.claude/skills/skill-name/SKILL.md": {
-      "path": "~/.claude/skills/skill-name/SKILL.md",
+    "~/.mcode/skills/skill-name/SKILL.md": {
+      "path": "~/.mcode/skills/skill-name/SKILL.md",
       "verdict": "Keep",
       "reason": "Concrete, actionable, unique value for X workflow",
       "mtime": "2026-01-15T08:30:00Z"

@@ -40,9 +40,9 @@ Tool count alone is a weak proxy for window pressure: a few large file reads or 
 
 ## Hook Setup
 
-**Installed as a plugin?** No setup is needed. The plugin's `hooks/hooks.json` already registers `suggest-compact.js` (hook id `pre:edit-write:suggest-compact`, active in the `standard` and `strict` hook profiles). Do not copy the block below into `~/.claude/settings.json` — `~/.claude/scripts/` does not exist on plugin installs, and duplicating a plugin hook causes double execution.
+**Installed as a plugin?** No setup is needed. The plugin's `hooks/hooks.json` already registers `suggest-compact.js` (hook id `pre:edit-write:suggest-compact`, active in the `standard` and `strict` hook profiles). Do not copy the block below into `~/.mcode/settings.json` — `~/.mcode/scripts/` does not exist on plugin installs, and duplicating a plugin hook causes double execution.
 
-**If installed manually** (`./install.sh`), add to your `~/.claude/settings.json`:
+**If installed manually** (`./install.sh`), add to your `~/.mcode/settings.json`:
 
 ```json
 {
@@ -50,11 +50,11 @@ Tool count alone is a weak proxy for window pressure: a few large file reads or 
     "PreToolUse": [
       {
         "matcher": "Edit",
-        "hooks": [{ "type": "command", "command": "node ~/.claude/scripts/hooks/suggest-compact.js" }]
+        "hooks": [{ "type": "command", "command": "node ~/.mcode/scripts/hooks/suggest-compact.js" }]
       },
       {
         "matcher": "Write",
-        "hooks": [{ "type": "command", "command": "node ~/.claude/scripts/hooks/suggest-compact.js" }]
+        "hooks": [{ "type": "command", "command": "node ~/.mcode/scripts/hooks/suggest-compact.js" }]
       }
     ]
   }
@@ -69,7 +69,7 @@ Environment variables:
 - `COMPACT_CONTEXT_INTERVAL` — Additional context tokens before the suggestion repeats (default: 60000)
 - `COMPACT_STATE_TTL_DAYS` — Days before stale per-session state files in the temp dir are swept (default: 14)
 - `ECC_CONTEXT_WINDOW_TOKENS` — Explicit context-window size, in tokens, overriding auto-detection. Set this for large-window models whose reported id lacks a `[1m]` marker (e.g. 400k Opus 4.x, or a new 1M-window model family) so the threshold scales to the real window instead of defaulting to 200k and overstating context usage.
-- `CLAUDE_CODE_AUTO_COMPACT_WINDOW` — Claude Code's native window-size override, in tokens; honored as a fallback when `ECC_CONTEXT_WINDOW_TOKENS` is unset.
+- `MCODE_AUTO_COMPACT_WINDOW` — MCode's native window-size override, in tokens; honored as a fallback when `ECC_CONTEXT_WINDOW_TOKENS` is unset.
 
 > The context window is otherwise auto-detected from a `[1m]` model marker or inferred when observed tokens already exceed 200k. On a large-window model that carries neither signal, set one of the overrides above so the `/compact` suggestion fires at the right point.
 
@@ -92,17 +92,17 @@ Understanding what persists helps you compact with confidence:
 
 | Persists | Lost |
 |----------|------|
-| CLAUDE.md instructions | Intermediate reasoning and analysis |
+| MCODE.md instructions | Intermediate reasoning and analysis |
 | Files on disk | File contents you previously read |
-| Memory files (`~/.claude/memory/`) | Multi-step conversation context |
+| Memory files (`~/.mcode/memory/`) | Multi-step conversation context |
 | Git state (commits, branches) | Tool call history and counts |
 | The task list — **only if you have the todo tools** (see below) | Nuanced user preferences stated verbally |
 
 > ### Don't rely on the task list surviving — it may not exist
 >
-> Claude Code **2.1.233 removed the todo/task tools by default** on Opus 4.8, Sonnet 5,
+> MCode **2.1.233 removed the todo/task tools by default** on Opus 4.8, Sonnet 5,
 > Fable 5, Mythos 5 and newer models (`TodoWrite`, `TaskCreate/Get/Update/List`).
-> `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` brings them back, but that is a per-machine
+> `MCODE_ENABLE_TODO_TOOLS=1` brings them back, but that is a per-machine
 > environment setting — **it does not travel with this skill**, so you cannot assume the
 > reader has it.
 >
@@ -134,15 +134,15 @@ Instead of loading full skill content at session start, use a trigger table that
 
 ### Context Composition Awareness
 Monitor what's consuming your context window:
-- **CLAUDE.md files** — Always loaded, keep lean
+- **MCODE.md files** — Always loaded, keep lean
 - **Loaded skills** — Each skill adds 1-5K tokens
 - **Conversation history** — Grows with each exchange
 - **Tool results** — File reads, search results add bulk
 
 ### Duplicate Instruction Detection
 Common sources of duplicate context:
-- Same rules in both `~/.claude/rules/` and project `.claude/rules/`
-- Skills that repeat CLAUDE.md instructions
+- Same rules in both `~/.mcode/rules/` and project `.mcode/rules/`
+- Skills that repeat MCODE.md instructions
 - Multiple skills covering overlapping domains
 
 ### Context Optimization Tools

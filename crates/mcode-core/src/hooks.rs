@@ -1,6 +1,6 @@
 //! hooks —— 8 事件生命周期钩子，双协议输出解析。
 //!
-//! 对齐 CC 的 hooks 语义：每个事件可挂多条命令，命中匹配器的命令以子进程
+//! 每个事件可挂多条命令，命中匹配器的命令以子进程
 //! 方式执行，事件载荷（JSON）写 stdin，**输出双协议**：
 //!
 //! - **exit-code 文本协议**：exit 0 = 放行（stdout 仅进 transcript 详细视图）；
@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
-/// 单条 hook 命令的默认超时（对齐 CC）。
+/// 单条 hook 命令的默认超时。
 pub const DEFAULT_HOOK_TIMEOUT_SECS: u64 = 60;
 
 // ---------------------------------------------------------------------------
@@ -192,7 +192,7 @@ impl HookRunner {
             .filter(|h| h.event == event)
             .filter(|h| match tool {
                 Some(t) => matcher_matches(&h.matcher, t),
-                None => true, // 非工具事件：匹配器不参与（对齐 CC）
+                None => true, // 非工具事件：匹配器不参与
             })
             .cloned()
             .collect();
@@ -346,7 +346,7 @@ fn cwd_of(payload: &Value) -> &Path {
 // 双协议解析
 // ---------------------------------------------------------------------------
 
-/// stdout JSON 输出（CC schema 子集）。
+/// stdout JSON 结构化输出。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HookJsonOutput {

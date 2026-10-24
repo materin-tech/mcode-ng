@@ -87,7 +87,7 @@ fn parse(args: &[String]) -> Result<Cli, String> {
             "-h" | "--help" => return Ok(Cli::Help),
             "-V" | "--version" => return Ok(Cli::Version),
             "-p" | "--print" => {
-                // 后续剩余参数整体作为 prompt（对齐 CC 的多词 prompt 习惯）
+                // 后续剩余参数整体作为 prompt
                 let rest: Vec<&String> = args[i + 1..].iter().collect();
                 if rest.is_empty() {
                     return Err("--print 需要 prompt 参数".into());
@@ -172,7 +172,7 @@ fn parse(args: &[String]) -> Result<Cli, String> {
             resume,
         });
     }
-    // 位置参数兜底：有裸 prompt 也走 print（CC 同款习惯）
+    // 位置参数兜底：有裸 prompt 也走 print
     if !positional.is_empty() {
         return Ok(Cli::Print {
             prompt: positional.join(" "),

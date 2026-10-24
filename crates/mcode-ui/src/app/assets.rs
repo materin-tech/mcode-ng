@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-/// 项目级 MCODE.md 记忆文档搜索 + 全局（最近优先：cwd → 根，对齐 CLI mdoc.ts）
+/// 项目级 MCODE.md 记忆文档搜索 + 全局（最近优先：cwd → 根）
 pub fn mcode_md_paths(cwd: &std::path::Path) -> Vec<PathBuf> {
     let mut out = vec![];
     let mut cur = Some(cwd.to_path_buf());
@@ -21,7 +21,7 @@ pub fn mcode_md_paths(cwd: &std::path::Path) -> Vec<PathBuf> {
     out
 }
 
-/// /init 模板（逐字对齐 TS memory/mdoc.ts 的 TEMPLATE）
+/// /init 模板。
 pub const MCODE_MD_TEMPLATE: &str = "# MCODE.md
 
 Project-level instructions for MCode. Loaded into the system prompt on every session.

@@ -280,18 +280,6 @@ pub const COMMANDS: &[CommandDef] = &[
         desc: "检查更新",
         mcode_only: false,
     },
-    CommandDef {
-        name: "/ide",
-        group: "账号与帮助",
-        desc: "CC 专属（暂未支持）",
-        mcode_only: false,
-    },
-    CommandDef {
-        name: "/install-github-app",
-        group: "账号与帮助",
-        desc: "CC 专属（暂未支持）",
-        mcode_only: false,
-    },
 ];
 
 /// `/` 补全过滤：对齐 CLI 补全面板行为（大小写不敏感、按 name 前缀/包含匹配）

@@ -1,12 +1,12 @@
 //! subagents：agent 定义/注册表 + `task` 工具族（同步/后台派发、递归护栏）。
 //!
-//! 对齐 CC 的 AgentTool/Task 核心语义：
+//! AgentTool/Task 核心语义：
 //! - agent 定义 = 内置 `general-purpose` + `~/.mcode/agents/*.md`（用户）
 //!   与 `.mcode/agents/*.md`（项目，优先）的 frontmatter 定义；
 //! - `task` 工具派发子代理：独立会话、独立回合循环（复用
 //!   [`run_agent_turn`]）、工具表按定义过滤；
 //! - **递归护栏**：子代理的工具表永远剥离 task 系工具（子代理不能再
-//!   派子代理），与 CC「subagents can't spawn subagents」一致；
+//!   派子代理）；
 //! - 子代理事件带 `scope = agent_type` 经 [`TaskEventBus`] 冒泡给 UI
 //!   （TextDelta/Done 不冒泡——最终报告随工具结果返回，避免污染父
 //!   会话文本流）；
@@ -110,7 +110,7 @@ impl AgentDefinition {
     }
 }
 
-/// 子代理默认系统提示（对齐 CC general-purpose 的职责说明）。
+/// 子代理默认系统提示（通用调研/改动职责说明）。
 pub const DEFAULT_SUBAGENT_PROMPT: &str = "你是 mcode 的子代理。根据调用方给出的任务，\
     使用可用工具完整执行——做到位即可，不过度加工，也不留半成品。\n\n\
     强项：\n\
@@ -484,7 +484,7 @@ impl TaskTool {
                 .map(|d| d.to_spec())
                 .collect(),
         );
-        // max_turns: 0 = 不限（对齐 CC 默认）
+        // max_turns: 0 = 不限（默认）
         let opts = if def.max_turns.unwrap_or(0) > 0 {
             opts.with_max_turns(def.max_turns.unwrap())
         } else {

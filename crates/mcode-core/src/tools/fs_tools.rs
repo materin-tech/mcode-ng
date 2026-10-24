@@ -1,11 +1,11 @@
 //! 文件类内置工具：read_file / write_file / edit_file / glob / grep。
 //!
-//! 对齐 CC 关键语义：
+//! 关键语义：
 //! - read_file：`cat -n` 行号格式、offset/limit 分段、图片转 base64 附件、
 //!   二进制拒绝、读取登记（read-before-write 的"读"半边）；
 //! - write_file：覆盖已有文件前校验已读+未漂移；产出 diff；
 //! - edit_file：old_string 必须唯一（replace_all 例外）、替换计数反馈；
-//! - glob：结果按 mtime 降序（最近改动的排前面，对齐 CC）；
+//! - glob：结果按 mtime 降序（最近改动的排前面）；
 //! - grep：正则 + glob 过滤 + 三种输出模式（content / files_with_matches /
 //!   count）+ 上下文行。
 
@@ -25,7 +25,7 @@ const MAX_LINE_CHARS: usize = 20_000;
 
 pub struct ReadFileTool;
 
-/// cat -n 风格行号：右对齐 6 位 + tab（对齐 CC 的 Read 输出格式）。
+/// cat -n 风格行号：右对齐 6 位 + tab。
 pub fn format_numbered_line(idx: usize, text: &str) -> String {
     format!("{:>6}\t{}", idx + 1, text)
 }

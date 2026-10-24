@@ -1,11 +1,11 @@
 //! bash 工具：cwd 跨调用持久、超时、后台任务（run_in_background）与收割。
 //!
-//! 对齐 CC 关键语义：
+//! 关键语义：
 //! - `cd` 在同会话内生效（BashSession.cwd 持久化），命令失败不更新；
 //! - `run_in_background=true` 立即返回任务 id，输出落盘可增量读；
 //! - `bash_output` 收割已结束任务（完整输出 + 退出码），运行中的返回增量；
 //! - 超时（默认 120s，可 timeout 参数）杀进程树并报告；
-//! - Windows 下经由 cmd /C 执行（对齐 CC 跨平台策略），Unix 走 sh。
+//! - Windows 下经由 cmd /C 执行，Unix 走 sh。
 
 use super::{state::TaskStatus, DisplayBlock, Tool, ToolContext, ToolDefinition, ToolResult};
 use anyhow::Result;
@@ -318,7 +318,7 @@ impl Tool for BashTool {
     }
 }
 
-/// bash_output：读取/收割后台任务输出（独立工具，CC 的 BashOutput 对齐）。
+/// bash_output：读取/收割后台任务输出（独立工具）。
 pub struct BashOutputTool;
 
 #[async_trait::async_trait]

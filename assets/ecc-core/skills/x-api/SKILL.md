@@ -44,7 +44,7 @@ headers = {"Authorization": f"Bearer {bearer}"}
 resp = requests.get(
     "https://api.x.com/2/tweets/search/recent",
     headers=headers,
-    params={"query": "claude code", "max_results": 10}
+    params={"query": "mcode code", "max_results": 10}
 )
 tweets = resp.json()
 ```
@@ -82,7 +82,7 @@ oauth = OAuth1Session(
 ```python
 resp = oauth.post(
     "https://api.x.com/2/tweets",
-    json={"text": "Hello from Claude Code"}
+    json={"text": "Hello from MCode"}
 )
 resp.raise_for_status()
 tweet_id = resp.json()["data"]["id"]

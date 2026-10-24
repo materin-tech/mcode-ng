@@ -78,7 +78,7 @@ info:      # log only
 When a critical threshold is crossed:
 - Desktop notification (macOS/Linux)
 - Optional: Slack/Discord webhook
-- Log to `~/.claude/canary-watch.log`
+- Log to `~/.mcode/canary-watch.log`
 
 ## Output
 

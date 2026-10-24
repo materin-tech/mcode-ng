@@ -1,6 +1,6 @@
 //! @ 文件引用展开——输入框里 `@path` 的解析、注入与高亮定位。
 //!
-//! 语义（对齐 TS CLI util/file-refs.ts 与 Claude Code 的 @ 提交处理）：
+//! 展开语义：
 //! - 用户正文原样保留，`@path` 即引用出处；
 //! - 文本文件 → `<attachment>` 内容块，目录 → 浅层列表，统一封进
 //!   `<mcode-attachments>` 附在正文后，并把"如何使用"的裁量权交给模型；
@@ -37,7 +37,7 @@ pub struct FileRefResult {
     pub attachments: Vec<(String, String)>,
 }
 
-/// 匹配 '@path' 引用：路径须以词字符结尾，避免吞掉句尾标点（对齐 CLI FILE_REF_PATTERN）
+/// 匹配 '@path' 引用：路径须以词字符结尾，避免吞掉句尾标点
 pub fn extract_refs(input: &str) -> Vec<String> {
     let mut refs = vec![];
     for r in extract_ref_ranges(input) {
@@ -289,7 +289,7 @@ mod tests {
     }
 
     /// @目录 → 浅层列表附件（不递归）；@文件 → 内容附件；统一封进
-    /// <mcode-attachments>，正文原样保留——对齐 Claude Code 的 @ 提交语义
+    /// <mcode-attachments>，正文原样保留
     #[test]
     fn expands_dir_and_file_refs_into_structured_attachments() {
         let base = std::env::temp_dir().join(format!("mcode-refs-{}", std::process::id()));

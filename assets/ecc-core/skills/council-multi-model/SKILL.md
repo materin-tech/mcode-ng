@@ -34,7 +34,7 @@ An external process is not automatically a heterogeneous reviewer.
 
 | Current host | Reviewer | Label |
 | --- | --- | --- |
-| Anthropic / Claude | OpenAI Codex | `cross-provider external critique` |
+| Anthropic / MCode | OpenAI Codex | `cross-provider external critique` |
 | OpenAI / Codex | OpenAI Codex | `same-provider external critique` |
 | Unknown | OpenAI Codex | `provider relationship unverified` |
 

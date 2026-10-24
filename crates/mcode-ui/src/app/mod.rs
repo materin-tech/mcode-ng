@@ -541,7 +541,7 @@ impl App {
                         .map(|d| d.to_spec())
                         .collect(),
                 )
-                // 0 = 不限轮数（CC 交互态）
+                // 0 = 不限轮数
                 .with_max_turns(0)
                 .with_thinking(effort);
             let _ = run_agent_turn(&deps, &mut guard, &opts, &sink).await;
@@ -549,7 +549,7 @@ impl App {
         cx.notify();
     }
 
-    // ---------- goal 外层循环（对齐 CLI runTurn） ----------
+    // ---------- goal 外层循环 ----------
 
     /// spawn goal 完成裁判（独立单发调用，结果经 GoalCheck 事件回主线程）
     fn spawn_goal_check(&mut self) {
@@ -949,7 +949,7 @@ impl App {
     }
 }
 
-/// @ 补全候选：层级下钻（对齐 CLI at_candidates 口径）。
+/// @ 补全候选：层级下钻口径。
 /// query 按末个 '/' 拆成目录前缀 + 过滤词，只列该目录的立即子项（树内目录
 /// 项带尾随 '/'），前缀匹配，最多 12 条。纯函数便于测试。
 pub(crate) fn at_candidates_from_tree(tree: &[String], query: &str) -> Vec<Candidate> {

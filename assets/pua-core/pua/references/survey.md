@@ -17,7 +17,7 @@
 - F) 非技术岗位（产品/运营/设计等）
 
 ### Q2. 你主要用哪个 AI 编程工具？（可多选）
-- A) Claude Code
+- A) MCode
 - B) Cursor
 - C) OpenAI Codex CLI
 - D) GitHub Copilot (VSCode)
@@ -46,7 +46,7 @@
 
 ---
 
-## 第二部分：Claude Code / AI 编程工具的痛点
+## 第二部分：MCode / AI 编程工具的痛点
 
 ### Q5. 你在用 AI 编程工具时，多久遇到一次以下问题？
 
@@ -75,7 +75,7 @@
 - B) 手动接管，自己写代码
 - C) 换一个新对话重来
 - D) 用 /pua 或类似的 skill 来施压
-- E) 切换模型（Opus → Sonnet / Claude → GPT）
+- E) 切换模型（Opus → Sonnet / MCode → GPT）
 - F) 认了，就这样
 - G) 其他: ____
 
@@ -256,7 +256,7 @@
 ### Q25. 如果你可以改变 PUA Skill 的一件事，你会改什么？
 [自由文本]
 
-### Q26. 你在用 Claude Code / AI 编程工具时，最大的"我希望有人解决这个问题"的时刻是什么？
+### Q26. 你在用 MCode / AI 编程工具时，最大的"我希望有人解决这个问题"的时刻是什么？
 [自由文本]
 
 ### Q27. 你还有什么想告诉我们的？

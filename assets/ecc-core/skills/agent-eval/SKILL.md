@@ -1,6 +1,6 @@
 ---
 name: agent-eval
-description: Head-to-head comparison of coding agents (Claude Code, Aider, Codex, etc.) on custom tasks with pass rate, cost, time, and consistency metrics. Use when choosing between coding agents, or when a change to an agent setup needs measured pass rate, cost, and time rather than an impression.
+description: Head-to-head comparison of coding agents (MCode, Aider, Codex, etc.) on custom tasks with pass rate, cost, time, and consistency metrics. Use when choosing between coding agents, or when a change to an agent setup needs measured pass rate, cost, and time rather than an impression.
 license: MIT
 metadata:
   origin: ECC
@@ -13,7 +13,7 @@ A lightweight CLI tool for comparing coding agents head-to-head on reproducible 
 
 ## When to Activate
 
-- Comparing coding agents (Claude Code, Aider, Codex, etc.) on your own codebase
+- Comparing coding agents (MCode, Aider, Codex, etc.) on your own codebase
 - Measuring agent performance before adopting a new tool or model
 - Running regression checks when an agent updates its model or tooling
 - Producing data-backed agent selection decisions for a team
@@ -75,7 +75,7 @@ mkdir tasks
 Execute agents against your tasks:
 
 ```bash
-agent-eval run --task tasks/add-retry-logic.yaml --agent claude-code --agent aider --runs 3
+agent-eval run --task tasks/add-retry-logic.yaml --agent mcode --agent aider --runs 3
 ```
 
 Each run:
@@ -97,7 +97,7 @@ Task: add-retry-logic (3 runs each)
 ┌──────────────┬───────────┬────────┬────────┬─────────────┐
 │ Agent        │ Pass Rate │ Cost   │ Time   │ Consistency │
 ├──────────────┼───────────┼────────┼────────┼─────────────┤
-│ claude-code  │ 3/3       │ $0.12  │ 45s    │ 100%        │
+│ mcode  │ 3/3       │ $0.12  │ 45s    │ 100%        │
 │ aider        │ 2/3       │ $0.08  │ 38s    │  67%        │
 └──────────────┴───────────┴────────┴────────┴─────────────┘
 ```

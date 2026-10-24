@@ -9,13 +9,13 @@ metadata:
 # Continuous Learning v2.1 - Instinct
 -Based Architecture
 
-An advanced learning system that turns your Claude Code sessions into reusable knowledge through atomic "instincts" - small learned behaviors with confidence scoring.
+An advanced learning system that turns your MCode sessions into reusable knowledge through atomic "instincts" - small learned behaviors with confidence scoring.
 
 **v2.1** adds **project-scoped instincts** — React patterns stay in your React project, Python conventions stay in your Python project, and universal patterns (like "always validate input") are shared globally.
 
 ## When to Activate
 
-- Setting up automatic learning from Claude Code sessions
+- Setting up automatic learning from MCode sessions
 - Configuring instinct-based behavior extraction via hooks
 - Tuning confidence thresholds for learned behaviors
 - Reviewing, exporting, or importing instinct libraries
@@ -27,7 +27,7 @@ An advanced learning system that turns your Claude Code sessions into reusable k
 
 | Feature | v2.0 | v2.1 |
 |---------|------|------|
-| Storage | Global (`~/.claude/homunculus/`) | Project-scoped (`${XDG_DATA_HOME:-~/.local/share}/ecc-homunculus/projects/<hash>/`) |
+| Storage | Global (`~/.mcode/homunculus/`) | Project-scoped (`${XDG_DATA_HOME:-~/.local/share}/ecc-homunculus/projects/<hash>/`) |
 | Scope | All instincts apply everywhere | Project-scoped + global |
 | Detection | None | git remote URL / repo path |
 | Promotion | N/A | Project → global when seen in 2+ projects |
@@ -128,7 +128,7 @@ Session Activity (in a git repo)
 
 The system automatically detects your current project:
 
-1. **`CLAUDE_PROJECT_DIR` env var** (highest priority) -- honored as an explicit override even when the directory is not a git repo (hashed by its absolute path)
+1. **`MCODE_PROJECT_DIR` env var** (highest priority) -- honored as an explicit override even when the directory is not a git repo (hashed by its absolute path)
 2. **`git remote get-url origin`** -- hashed to create a portable project ID (same repo on different machines gets the same ID)
 3. **`git rev-parse --show-toplevel`** -- fallback using repo path (machine-specific)
 4. **Global fallback** -- if no project is detected, instincts go to global scope
@@ -137,13 +137,13 @@ Each project gets a 12-character hash ID (e.g., `a1b2c3d4e5f6`). A registry file
 
 ### Data Directory
 
-Continuous-learning-v2 stores observer data outside `~/.claude` so Claude Code's sensitive-path guard does not block background instinct writes:
+Continuous-learning-v2 stores observer data outside `~/.mcode` so MCode's sensitive-path guard does not block background instinct writes:
 
 1. `CLV2_HOMUNCULUS_DIR` when set to an absolute path
 2. `$XDG_DATA_HOME/ecc-homunculus`
 3. `$HOME/.local/share/ecc-homunculus`
 
-Existing users with data at `~/.claude/homunculus` can migrate once:
+Existing users with data at `~/.mcode/homunculus` can migrate once:
 
 ```bash
 bash skills/continuous-learning-v2/scripts/migrate-homunculus.sh
@@ -155,11 +155,11 @@ bash skills/continuous-learning-v2/scripts/migrate-homunculus.sh
 
 **If installed as a plugin** (recommended):
 
-No extra `settings.json` hook block is required. Claude Code v2.1+ auto-loads the plugin `hooks/hooks.json`, and `observe.sh` is already registered there.
+No extra `settings.json` hook block is required. MCode v2.1+ auto-loads the plugin `hooks/hooks.json`, and `observe.sh` is already registered there.
 
-If you previously copied `observe.sh` into `~/.claude/settings.json`, remove that duplicate `PreToolUse` / `PostToolUse` block. Duplicating the plugin hook causes double execution and `${CLAUDE_PLUGIN_ROOT}` resolution errors because that variable is only available inside plugin-managed `hooks/hooks.json` entries.
+If you previously copied `observe.sh` into `~/.mcode/settings.json`, remove that duplicate `PreToolUse` / `PostToolUse` block. Duplicating the plugin hook causes double execution and `${MCODE_PLUGIN_ROOT}` resolution errors because that variable is only available inside plugin-managed `hooks/hooks.json` entries.
 
-**If installed manually** to `~/.claude/skills`, add this to your `~/.claude/settings.json`:
+**If installed manually** to `~/.mcode/skills`, add this to your `~/.mcode/settings.json`:
 
 ```json
 {
@@ -168,14 +168,14 @@ If you previously copied `observe.sh` into `~/.claude/settings.json`, remove tha
       "matcher": "*",
       "hooks": [{
         "type": "command",
-        "command": "~/.claude/skills/continuous-learning-v2/hooks/observe.sh"
+        "command": "~/.mcode/skills/continuous-learning-v2/hooks/observe.sh"
       }]
     }],
     "PostToolUse": [{
       "matcher": "*",
       "hooks": [{
         "type": "command",
-        "command": "~/.claude/skills/continuous-learning-v2/hooks/observe.sh"
+        "command": "~/.mcode/skills/continuous-learning-v2/hooks/observe.sh"
       }]
     }]
   }
@@ -343,7 +343,7 @@ Confidence evolves over time:
 
 ## Why Hooks vs Skills for Observation?
 
-> "v1 relied on skills to observe. Skills are probabilistic -- they fire ~50-80% of the time based on Claude's judgment."
+> "v1 relied on skills to observe. Skills are probabilistic -- they fire ~50-80% of the time based on MCode's judgment."
 
 Hooks fire **100% of the time**, deterministically. This means:
 - Every tool call is observed
@@ -353,8 +353,8 @@ Hooks fire **100% of the time**, deterministically. This means:
 ## Backward Compatibility
 
 v2.1 is fully compatible with v2.0 and v1:
-- Existing global instincts can be migrated from `~/.claude/homunculus/instincts/` with `scripts/migrate-homunculus.sh`
-- Existing `~/.claude/skills/learned/` skills from v1 still work
+- Existing global instincts can be migrated from `~/.mcode/homunculus/instincts/` with `scripts/migrate-homunculus.sh`
+- Existing `~/.mcode/skills/learned/` skills from v1 still work
 - Stop hook still runs (but now also feeds into v2)
 - Gradual migration: run both in parallel
 
@@ -374,4 +374,4 @@ v2.1 is fully compatible with v2.0 and v1:
 
 ---
 
-*Instinct-based learning: teaching Claude your patterns, one project at a time.*
+*Instinct-based learning: teaching MCode your patterns, one project at a time.*

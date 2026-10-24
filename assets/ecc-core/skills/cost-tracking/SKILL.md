@@ -1,24 +1,24 @@
 ---
 name: cost-tracking
-description: Track and report Claude Code token usage, spending, and budgets from the local ECC cost-tracker metrics log. Use when the user asks about costs, spending, usage, tokens, budgets, or cost breakdowns by model, session, or date.
+description: Track and report MCode token usage, spending, and budgets from the local ECC cost-tracker metrics log. Use when the user asks about costs, spending, usage, tokens, budgets, or cost breakdowns by model, session, or date.
 metadata:
   origin: community
 ---
 
 # Cost Tracking
 
-Use this skill to analyze Claude Code cost and usage history from the metrics log
+Use this skill to analyze MCode cost and usage history from the metrics log
 that ECC's `stop:cost-tracker` hook writes.
 
 ## Where the data lives
 
 The tracker appends one JSON object per session-stop to
-`~/.claude/metrics/costs.jsonl`. Each row is a **cumulative snapshot for that
+`~/.mcode/metrics/costs.jsonl`. Each row is a **cumulative snapshot for that
 session**, so to total spend you take the **latest row per `session_id`** and
 sum across sessions — summing every row multiply-counts.
 
 ECC also maintains internal per-session files under
-`~/.claude/metrics/cost-snapshots/` so runtime hooks can read the current
+`~/.mcode/metrics/cost-snapshots/` so runtime hooks can read the current
 session total without rescanning all history. Treat those files as a
 rebuildable cache; each snapshot stores a byte cursor so only newly appended
 rows are scanned. Stable reads are O(1), while updates are O(new bytes). Stale
@@ -32,7 +32,7 @@ Row schema:
 | Field | Meaning |
 | --- | --- |
 | `timestamp` | ISO timestamp of the snapshot |
-| `session_id` | Claude Code session identifier |
+| `session_id` | MCode session identifier |
 | `transcript_path` | Path to the session transcript |
 | `model` | Model used |
 | `input_tokens` / `output_tokens` | Token counts |
@@ -55,7 +55,7 @@ First verify the log exists (use `node`, not `sqlite3` — the tracker writes
 JSONL, and `node` is cross-platform):
 
 ```bash
-node -e 'const fs=require("fs"),os=require("os"),p=require("path");const f=p.join(os.homedir(),".claude","metrics","costs.jsonl");console.log(fs.existsSync(f)?"cost log found":"cost log not found: "+f)'
+node -e 'const fs=require("fs"),os=require("os"),p=require("path");const f=p.join(os.homedir(),".mcode","metrics","costs.jsonl");console.log(fs.existsSync(f)?"cost log found":"cost log not found: "+f)'
 ```
 
 If the log is missing, do not fabricate usage data. Tell the user that cost
@@ -67,7 +67,7 @@ hook enabled.
 ```bash
 node -e '
 const fs=require("fs"),os=require("os"),path=require("path");
-const f=path.join(os.homedir(),".claude","metrics","costs.jsonl");
+const f=path.join(os.homedir(),".mcode","metrics","costs.jsonl");
 if(!fs.existsSync(f)){console.log("cost log not found: "+f);process.exit(0);}
 const rows=fs.readFileSync(f,"utf8").split(/\r?\n/).filter(Boolean).map(l=>{try{return JSON.parse(l)}catch{return null}}).filter(Boolean);
 const bySession=new Map();

@@ -1,13 +1,13 @@
 ---
 name: autonomous-agent-harness
-description: Transform Claude Code into a fully autonomous agent system with persistent memory, scheduled operations, computer use, and task queuing. Replaces standalone agent frameworks (Hermes, AutoGPT) by leveraging Claude Code's native crons, dispatch, MCP tools, and memory. Use when the user wants continuous autonomous operation, scheduled tasks, or a self-directing agent loop.
+description: Transform MCode into a fully autonomous agent system with persistent memory, scheduled operations, computer use, and task queuing. Replaces standalone agent frameworks (Hermes, AutoGPT) by leveraging MCode's native crons, dispatch, MCP tools, and memory. Use when the user wants continuous autonomous operation, scheduled tasks, or a self-directing agent loop.
 metadata:
   origin: ECC
 ---
 
 # Autonomous Agent Harness
 
-Combine Claude Code's session tools with separately configured scheduling, memory, and computer-use integrations. This is a setup pattern, not a bundled always-on runtime.
+Combine MCode's session tools with separately configured scheduling, memory, and computer-use integrations. This is a setup pattern, not a bundled always-on runtime.
 
 ## Consent and Safety Boundaries
 
@@ -28,7 +28,7 @@ Prefer dry-run plans and local queue files before enabling recurring or event-dr
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                    Claude Code Runtime                        │
+│                    MCode Runtime                        │
 │                                                              │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐ │
 │  │  Crons   │  │ Dispatch │  │ Memory   │  │ Computer    │ │
@@ -56,9 +56,9 @@ Prefer dry-run plans and local queue files before enabling recurring or event-dr
 
 ### 1. Persistent Memory
 
-Use Claude Code's built-in memory system enhanced with MCP memory server for structured data.
+Use MCode's built-in memory system enhanced with MCP memory server for structured data.
 
-**Built-in memory** (`~/.claude/projects/*/memory/`):
+**Built-in memory** (`~/.mcode/projects/*/memory/`):
 - User preferences, feedback, project context
 - Stored as markdown files with frontmatter
 - Automatically loaded at session start
@@ -75,7 +75,7 @@ Use Claude Code's built-in memory system enhanced with MCP memory server for str
 Use TodoWrite for in-session task tracking
 
 # Medium-term: project memory files
-Write to ~/.claude/projects/*/memory/ for cross-session recall
+Write to ~/.mcode/projects/*/memory/ for cross-session recall
 
 # Long-term: MCP knowledge graph
 Use mcp__memory__create_entities for permanent structured data
@@ -85,19 +85,19 @@ Use mcp__memory__add_observations for new facts about known entities
 
 ### 2. Scheduled Operations (Crons)
 
-Use Claude Code's native [scheduled tasks](https://code.claude.com/docs/en/scheduled-tasks) for recurring prompts within an interactive session. These tasks are session-scoped; an external scheduler is required for work that must run independently of an open session. No scheduling MCP server is required for `/loop`.
+Use MCode's native [scheduled tasks] for recurring prompts within an interactive session. These tasks are session-scoped; an external scheduler is required for work that must run independently of an open session. No scheduling MCP server is required for `/loop`.
 
 **Setting up a cron:**
 
 ```
-# In an interactive Claude Code session
+# In an interactive MCode session
 /loop 30m Review open PRs in this repository and summarize CI failures.
 ```
 
 For a one-shot run from a shell, set the working directory before invoking the CLI:
 
 ```bash
-cd "/path/to/repo" && claude -p "Review open PRs and summarize"
+cd "/path/to/repo" && mcode -p "Review open PRs and summarize"
 ```
 
 Use an OS scheduler or CI schedule to invoke that command repeatedly when no interactive session is running. Configure the runner's authentication and tool permissions separately.
@@ -114,24 +114,24 @@ Use an OS scheduler or CI schedule to invoke that command repeatedly when no int
 
 ### 3. Dispatch / Remote Agents
 
-Have an authenticated CI job or webhook receiver invoke Claude Code in a workspace it owns. The supported entrypoint is [programmatic CLI mode](https://code.claude.com/docs/en/headless), not a public Anthropic dispatch endpoint.
+Have an authenticated CI job or webhook receiver invoke MCode in a workspace it owns. The supported entrypoint is [programmatic CLI mode], not a public Anthropic dispatch endpoint.
 
 **Dispatch patterns:**
 
 ```bash
 # Run inside the CI workspace
-cd "/path/to/repo" && claude -p "Build failed on main. Diagnose the failure."
+cd "/path/to/repo" && mcode -p "Build failed on main. Diagnose the failure."
 
 # Trigger from webhook
-# GitHub webhook -> authenticated CI runner -> claude -p -> reviewable result
+# GitHub webhook -> authenticated CI runner -> mcode -p -> reviewable result
 
 # Trigger from another agent
-claude -p "Analyze the output of the security scan and create issues for findings"
+mcode -p "Analyze the output of the security scan and create issues for findings"
 ```
 
 ### 4. Computer Use
 
-Computer control needs a separately configured integration. Anthropic's [computer-use tool and reference environment](https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool) require an application to execute tool calls in an isolated desktop environment. Adding an MCP package name does not supply that environment.
+Computer control needs a separately configured integration. Anthropic's [computer-use tool and reference environment] require an application to execute tool calls in an isolated desktop environment. Adding an MCP package name does not supply that environment.
 
 **Capabilities:**
 - Browser automation (navigate, click, fill forms, screenshot)
@@ -152,7 +152,7 @@ Manage a persistent queue of tasks that survive session boundaries.
 
 ```
 # Task persistence via memory
-Write task queue to ~/.claude/projects/*/memory/task-queue.md
+Write task queue to ~/.mcode/projects/*/memory/task-queue.md
 
 # Task format
 ---
@@ -175,7 +175,7 @@ description: Persistent task queue for autonomous operation
 | Hermes Component | ECC Equivalent | How |
 |------------------|---------------|-----|
 | Gateway/Router | CLI + external scheduler | An authenticated runner starts agent sessions |
-| Memory System | Claude memory + MCP memory server | Built-in persistence + knowledge graph |
+| Memory System | MCode memory + MCP memory server | Built-in persistence + knowledge graph |
 | Tool Registry | MCP servers | Dynamically loaded tool providers |
 | Orchestration | ECC skills + agents | Skill definitions direct agent behavior |
 | Computer Use | Separately configured integration | Browser or desktop control in an isolated environment |
@@ -188,7 +188,7 @@ description: Persistent task queue for autonomous operation
 
 Memory MCP is optional. The [MCP reference memory server](https://github.com/modelcontextprotocol/servers/tree/main/src/memory) is published as `@modelcontextprotocol/server-memory`; version `2026.8.31` was verified on the public npm registry on 2026-09-07. It is a reference implementation, not an ECC-bundled service.
 
-After reviewing that package and approving its use, merge this entry into the user-scoped MCP configuration in `~/.claude.json`, preserving existing settings. Replace `MEMORY_FILE_PATH` with an absolute path in a private directory you own. See [Claude Code MCP configuration](https://code.claude.com/docs/en/mcp) for CLI registration and Windows `cmd /c npx` configuration.
+After reviewing that package and approving its use, merge this entry into the user-scoped MCP configuration in `~/.mcode.json`, preserving existing settings. Replace `MEMORY_FILE_PATH` with an absolute path in a private directory you own. See [MCode MCP configuration] for CLI registration and Windows `cmd /c npx` configuration.
 
 ```json
 {
@@ -214,13 +214,13 @@ For polling during an interactive session, enter:
 /loop 30m Review open PRs in this repository and summarize CI failures.
 ```
 
-For daily or weekly work that must survive a closed session, configure an external scheduler, such as an OS cron job or GitHub Actions, to run the one-shot command from Step 2 of Core Components. Calling `claude -p` to request a schedule does not provision an always-on scheduler. Choose the schedule, workspace, and allowed actions explicitly before enabling it.
+For daily or weekly work that must survive a closed session, configure an external scheduler, such as an OS cron job or GitHub Actions, to run the one-shot command from Step 2 of Core Components. Calling `mcode -p` to request a schedule does not provision an always-on scheduler. Choose the schedule, workspace, and allowed actions explicitly before enabling it.
 
 ### Step 3: Initialize Memory Graph
 
 ```bash
 # Bootstrap your identity and context
-claude -p "Create memory entities for: me (user profile), my projects, my key contacts. Add observations about current priorities."
+mcode -p "Create memory entities for: me (user profile), my projects, my key contacts. Add observations about current priorities."
 ```
 
 ### Step 4: Enable Computer Use (Optional)

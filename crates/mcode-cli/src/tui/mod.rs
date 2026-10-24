@@ -1,7 +1,7 @@
 //! TUI 主循环：crossterm 事件 → 状态机 → ratatui 渲染；回合在 tokio
 //! 任务里跑，事件经无界通道回 UI 线程。
 //!
-//! 交互契约（对齐 CC 的核心键位）：
+//! 交互契约（核心键位）：
 //! - Enter 发送；busy 时输入自动排队，回合结束按 FIFO 续发；
 //! - esc 打断当前回合；**双击 esc** 打开回退列表（会话 + 文件快照）；
 //! - 工具需确认时弹窗：y/Enter 允许一次、a 本会话总是、n/Esc 拒绝；
@@ -513,7 +513,7 @@ async fn run_session(
                     detail: None,
                 });
             }
-            // 不进对话循环：列出即出（CC 的 --resume 无 id 是选择器，先给清单）
+            // 不进对话循环：列出即出（--resume 无 id = 先给选择清单）
             let _guard = TerminalGuard::enter()?;
             let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
             let mut st = AppState {

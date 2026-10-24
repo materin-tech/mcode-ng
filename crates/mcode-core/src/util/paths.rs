@@ -2,13 +2,13 @@
 //!
 //! [`contain_to_workspace`] 是所有文件类工具（read/write/edit/glob/grep/@引用）
 //! 的唯一入口守卫：`~` 展开、符号链接逃逸拒绝、新建文件的逐段校验，
-//! 语义对齐 TS CLI guard.ts。file_refs / tools 都从这里取用，不许各写一份。
+//! 路径守卫：file_refs / tools 都从这里取用，不许各写一份。
 
 use std::path::{Component, Path, PathBuf};
 
 /// 工作区路径收敛（防路径逃逸）：
 /// - `~` / `~/x` 展开 HOME 后**不受**工作区限制（用户主目录天然可见，
-///   对齐 TS CLI：@~/.ssh/config 允许读取，由权限层另行把关）；
+///   @~/.ssh/config 允许读取，由权限层另行把关）；
 /// - 相对路径基于 canonical 后的工作区根（规避 /var → /private/var 符号链接）；
 /// - 已存在的目标 canonical 后必须仍在根内，否则拒绝；
 /// - 不存在的目标（write 新文件）逐段校验，拒绝 `..` / 根前缀 / Windows 盘符。

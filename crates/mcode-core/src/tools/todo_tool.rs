@@ -1,6 +1,6 @@
-//! TodoWrite —— 任务清单工具（CC 的 TodoWrite 对齐）。
+//! todo_write —— 任务清单工具。
 //!
-//! 语义：整表替换；同表内至多一个 in_progress（CC 提示语对齐）；
+//! 语义：整表替换；同表内至多一个 in_progress；
 //! 状态机 pending → in_progress → completed。
 
 use super::{Tool, ToolContext, ToolDefinition, ToolResult};

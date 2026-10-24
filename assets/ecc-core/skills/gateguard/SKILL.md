@@ -7,14 +7,14 @@ metadata:
 
 # GateGuard — Fact-Forcing Pre-Action Gate
 
-A PreToolUse hook that forces Claude to investigate before editing. Instead of self-evaluation ("are you sure?"), it demands concrete facts. The act of investigation creates awareness that self-evaluation never did.
+A PreToolUse hook that forces MCode to investigate before editing. Instead of self-evaluation ("are you sure?"), it demands concrete facts. The act of investigation creates awareness that self-evaluation never did.
 
 ## When to Activate
 
 - Working on any codebase where file edits affect multiple modules
 - Projects with data files that have specific schemas or date formats
 - Teams where AI-generated code must match existing patterns
-- Any workflow where Claude tends to guess instead of investigating
+- Any workflow where MCode tends to guess instead of investigating
 
 ## Core Concept
 
@@ -141,21 +141,21 @@ The code questions carry no signal for a `SKILL.md`, a README, a test, or a
 YAML file, so the first-touch gate classifies the target first.
 
 Classification uses the target's path relative to the project root
-(`CLAUDE_PROJECT_DIR`, then the payload `cwd`, then the process directory),
+(`MCODE_PROJECT_DIR`, then the payload `cwd`, then the process directory),
 so a project that lives under, say, `~/work/tests/` does not turn every file
-into a test. A leading `.claude/worktrees/<name>/` is stripped, since a
+into a test. A leading `.mcode/worktrees/<name>/` is stripped, since a
 worktree mirrors the project, but only when
-`<root>/.claude/worktrees/<name>/.git` exists; otherwise the path stays under
-`.claude`. On Windows-style paths (and any segment containing `::$`), trailing
-dots/spaces and a `:stream` suffix are dropped first, so `CLAUDE.md.` and
-`CLAUDE.md::$DATA` classify as `CLAUDE.md`. Targets outside the root are
+`<root>/.mcode/worktrees/<name>/.git` exists; otherwise the path stays under
+`.mcode`. On Windows-style paths (and any segment containing `::$`), trailing
+dots/spaces and a `:stream` suffix are dropped first, so `MCODE.md.` and
+`MCODE.md::$DATA` classify as `MCODE.md`. Targets outside the root are
 classified by their absolute path. The path is lowercased and `/`-separated,
 and the first match wins:
 
-1. **instruction** — basename `CLAUDE.md`, `AGENTS.md`, `AGENT.md`,
+1. **instruction** — basename `MCODE.md`, `AGENTS.md`, `AGENT.md`,
    `GEMINI.md`, `SKILL.md`, `copilot-instructions.md`, `.cursorrules`, or
    `.windsurfrules`; any `.mdc` file; a `.md`/`.mdx`/`.txt` file under a
-   `.claude`, `agents`, `commands`, `skills`, `rules`, `hooks`, `.cursor`,
+   `.mcode`, `agents`, `commands`, `skills`, `rules`, `hooks`, `.cursor`,
    `.codex`, or `.opencode` directory; or a `*instructions*.md` file under
    `.github/`
 2. **test** — `*.test.*`, `*.spec.*`, `test_*.py`, `*_test.py`, `*_test.go`,
@@ -173,7 +173,7 @@ and Write unless noted. Items marked *(search)* carry the suffix
 
 | Class | Questions |
 |---|---|
-| instruction | Name the harness/loader that reads this file (Claude Code, Codex, Cursor, OpenCode, …) and when it loads it · Describe what agent behaviour changes as a result · Confirm no existing instruction, skill, or agent file already covers this *(search)* |
+| instruction | Name the harness/loader that reads this file (MCode, Codex, Cursor, OpenCode, …) and when it loads it · Describe what agent behaviour changes as a result · Confirm no existing instruction, skill, or agent file already covers this *(search)* |
 | test | Name what behaviour is under test and which module/function it exercises · Name the existing test file(s) covering this module, or confirm none exist *(search)* |
 | prose (Write) | Name any existing doc this supersedes or duplicates *(search)* · State where it will be linked or referenced from · Explain why a new file rather than editing an existing one |
 | prose (Edit) | List other docs or code that reference the section being changed *(search)* · State what the change corrects or adds |
@@ -255,7 +255,7 @@ anything is ambiguous.
 For each Edit/Write/NotebookEdit target (and each MultiEdit entry) the gate
 decides in this order; the first rule that applies wins:
 
-1. **Exempt** (`GATEGUARD_EXEMPT_GLOBS`, Claude settings files) — allowed.
+1. **Exempt** (`GATEGUARD_EXEMPT_GLOBS`, MCode settings files) — allowed.
    Operator exemptions are authoritative: they win over every later rule,
    including the sensitive and hard-link rules, so a glob that covers
    `src/auth/**` or a hard-linked file turns its check off. Exempt only
@@ -327,7 +327,7 @@ An Edit, Write, NotebookEdit, or MultiEdit entry is allowed, with an
 - **Qualifying tools:** `Glob`, `Grep`, `LS`, and Bash/PowerShell command
   segments led by `rg`, `grep`, `egrep`, `fgrep`, `git grep`,
   `git ls-files`, `find`, `fd`, `ls`, `tree`, `Get-ChildItem`, `gci`,
-  `Select-String`, or `sls`. **`Read` never counts** — Claude Code already
+  `Select-String`, or `sls`. **`Read` never counts** — MCode already
   requires a Read before an Edit, so it proves nothing extra.
 - **Current human turn:** the turn starts at the latest real user message or
   at a compaction (a compact-summary record or a `compact_boundary` marker),
@@ -424,7 +424,7 @@ An Edit, Write, NotebookEdit, or MultiEdit entry is allowed, with an
   matching still applies. **Edit, MultiEdit, and a Write that overwrites an
   existing file match by stem only.**
 - **Paths:** relative targets and search paths resolve against the tool's
-  `cwd`, then `CLAUDE_PROJECT_DIR`, then the process directory. Comparison is
+  `cwd`, then `MCODE_PROJECT_DIR`, then the process directory. Comparison is
   case-insensitive for Windows paths only. Shell commands are read with bash
   quoting rules, so on Windows an operand credits when spelled `C:/x/src`;
   backslash spellings (`C:\x\src`, quoted or not) and MSYS spellings
@@ -495,14 +495,14 @@ would be identical, so only the first is denied:
 - Applies to a **Write of a file that does not exist yet** whose class is
   `code`, `test`, or `prose`. Never collapsed: `config` and `instruction`
   files, and any path with a segment starting with `.` (dotfiles and every
-  dot-directory: `.claude`, `.github`, `.git`, `.husky`, `.devcontainer`,
-  `.githooks`, `.idea`, `.vscode`, …) or an 8.3 short name (`CLAUDE~1`),
+  dot-directory: `.mcode`, `.github`, `.git`, `.husky`, `.devcontainer`,
+  `.githooks`, `.idea`, `.vscode`, …) or an 8.3 short name (`MCODE~1`),
   checked on the same project-relative path as the class.
 - The directory is also resolved to its **real location** (symlinks
   followed; missing directories are resolved from the nearest existing
   parent). If that differs from the path as written, the real path must be
   inside the project, keep the same class, and pass the same screen, so a
-  symlink such as `src/tools -> .claude/hooks` never collapses. Gates are
+  symlink such as `src/tools -> .mcode/hooks` never collapses. Gates are
   keyed by the real directory. Any filesystem error means no collapse.
 - After such a Write is denied, later first-touch Writes of new files **of the
   same class in the same directory** are allowed with the note "Sibling of
@@ -511,7 +511,7 @@ would be identical, so only the first is denied:
 - The window is the **same human turn**. The turn id is the turn-start
   record's own `promptId`, else its `uuid`, else a hash of that record. When
   the turn started before the transcript tail, the id is the `promptId` that
-  every user record in the window agrees on (Claude Code stamps it on the
+  every user record in the window agrees on (MCode stamps it on the
   prompt and on every tool result of the turn); if they disagree there is no
   turn id. Only when **no transcript path is available at all** does a gate
   recorded without a turn id match for **120 seconds**; a transcript that is
@@ -524,7 +524,7 @@ would be identical, so only the first is denied:
 ### Canonical path keys
 
 Checked state is keyed on the canonical path: a relative `file_path` resolves
-against the tool's `cwd` (where the tool runs), then `CLAUDE_PROJECT_DIR`,
+against the tool's `cwd` (where the tool runs), then `MCODE_PROJECT_DIR`,
 then the process directory, with `/` separators, lowercased on Windows only.
 `a.py`, `./a.py`, and the absolute path share one first-touch. State files
 written by earlier versions (raw keys) are still honoured.
@@ -624,7 +624,7 @@ file it decided):
 | `tool` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, `Bash` or `PowerShell` |
 | `class` | Target class, or `null` for shell commands |
 | `decision` | `deny`, `credit`, `sibling`, `cap`, `trivial`, `pass-checked`, `pass-exempt`, `pass-subagent`, `routine-deny`, `routine-readonly`, `destructive-deny` or `pass` |
-| `reason` | Short code: `first-touch`, `sensitive`, `hard-linked`, `near-miss:<code>`, `subagent-sensitive`, `subagent-hard-linked`, `prior-search`, `comment-whitespace`, `same-turn-dir`, `max-denials`, `checked`, `exempt-glob`, `claude-settings`, `no-path`, `subagent`, `readonly-git`, `readonly`, `first-command`, `routine-checked`, `routine-disabled`, `destructive`, `destructive-retry`, `state-error` |
+| `reason` | Short code: `first-touch`, `sensitive`, `hard-linked`, `near-miss:<code>`, `subagent-sensitive`, `subagent-hard-linked`, `prior-search`, `comment-whitespace`, `same-turn-dir`, `max-denials`, `checked`, `exempt-glob`, `mcode-settings`, `no-path`, `subagent`, `readonly-git`, `readonly`, `first-command`, `routine-checked`, `routine-disabled`, `destructive`, `destructive-retry`, `state-error` |
 | `questions` | Question ids of a first-touch denial; `null` otherwise |
 | `sensitive` | Whether the target is a [sensitive target](#sensitive-targets) |
 | `profile` | Change-profile flags when the profile was computed; `null` otherwise |
@@ -659,7 +659,7 @@ For hook-level control, keep using `ECC_DISABLED_HOOKS` with the GateGuard hook 
 #### Glob semantics for `GATEGUARD_EXEMPT_GLOBS`
 
 Patterns match the entire project-relative target path. The project root is
-`CLAUDE_PROJECT_DIR`, falling back to the hook payload's `cwd`, then the hook
+`MCODE_PROJECT_DIR`, falling back to the hook payload's `cwd`, then the hook
 process working directory. Relative globs never exempt targets outside that
 root. Explicit absolute globs match the entire absolute target path and may
 deliberately exempt paths outside the project.

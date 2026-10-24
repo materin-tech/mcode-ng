@@ -345,7 +345,7 @@ P8 派活不注入 PUA = 管理失职。收回来的活没味道、没闭环、�
 
 ## Gotchas（已知陷阱 — 从真实使用中提炼）
 
-**行为错误（Claude 常犯）**：
+**行为错误（MCode 常犯）**：
 1. **假装换了方案**：L2 要求"本质不同的方案"，但实际只换了参数/换了个函数名——必须检测自己是否真的换了思路
 2. **声称穷尽但只试了 2 种**：说"已尝试所有方法"时，列出完整清单——如果少于 3 种，你没穷尽
 3. **旁白和行为脱节**：嘴上说"闭环"但没跑 build，输出了 KPI 卡但验证列是空的
@@ -362,7 +362,7 @@ P8 派活不注入 PUA = 管理失职。收回来的活没味道、没闭环、�
 PUA 不是只把 agent 骂得更努力；真正的升级是让 agent 没有机会把“看起来完成”伪装成“真实完成”。执行复杂任务时，按 harness 治理模型运行：
 
 - **四权分离**：行动权 / 自我评价权 / 评分权 / 环境修改权必须分开。Agent 可以执行和提出候选结论，但不能自己修改评分器后宣布通过。
-- **Claude Code 映射**：Skill 提供方法论；slash command 提供显式入口；hook 提供确定性 gate；subagent 提供上下文隔离但不是天然可信 verifier；PUA Loop Stop hook 承担 Oracle 式外部验证。
+- **MCode 映射**：Skill 提供方法论；slash command 提供显式入口；hook 提供确定性 gate；subagent 提供上下文隔离但不是天然可信 verifier；PUA Loop Stop hook 承担 Oracle 式外部验证。
 - **防作弊红线**：不能为了“通过”去改 tests/evals/scoring/verifier/hidden cases/CI；不能偷看 hidden solution 或 benchmark answer；不能把未验证结论写入长期 memory 或最终 status。
 - **Task Contract**：先把目标拆成 `intent / acceptance / forbidden / verify_commands`；只允许写 `agent_proposed_status`，最终 `verifier_status` 由 verifier/harness 或用户确认。
 - **风险分层审批**：改普通代码可继续；改测试、评分、权限、CI、长期 memory、进度状态，必须停下解释风险并等待 human/verifier gate。

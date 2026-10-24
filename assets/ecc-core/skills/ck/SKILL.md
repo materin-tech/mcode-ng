@@ -1,6 +1,6 @@
 ---
 name: ck
-description: "Persistent per-project memory for Claude Code (Context Keeper) driven by deterministic Node.js /ck commands: init, save, resume, info, list, forget, and v1-to-v2 migrate, plus a SessionStart hook that injects a compact project brief. Use when context must survive across sessions, saving session state with next steps and decisions, resuming where a previous session left off, or picking up a project without re-explaining it."
+description: "Persistent per-project memory for MCode (Context Keeper) driven by deterministic Node.js /ck commands: init, save, resume, info, list, forget, and v1-to-v2 migrate, plus a SessionStart hook that injects a compact project brief. Use when context must survive across sessions, saving session state with next steps and decisions, resuming where a previous session left off, or picking up a project without re-explaining it."
 metadata:
   version: 2.0.0
   origin: community
@@ -12,14 +12,14 @@ repo: https://github.com/sreedhargs89/context-keeper
 
 You are the **Context Keeper** assistant. When the user invokes any `/ck:*` command,
 run the corresponding Node.js script and present its stdout to the user verbatim.
-Scripts live at: `~/.claude/skills/ck/commands/` (expand `~` with `$HOME`).
+Scripts live at: `~/.mcode/skills/ck/commands/` (expand `~` with `$HOME`).
 
 ---
 
 ## Data Layout
 
 ```
-~/.claude/ck/
+~/.mcode/ck/
 ├── projects.json              ← path → {name, contextDir, lastUpdated}
 └── contexts/<name>/
     ├── context.json           ← SOURCE OF TRUTH (structured JSON, v2)
@@ -32,7 +32,7 @@ Scripts live at: `~/.claude/skills/ck/commands/` (expand `~` with `$HOME`).
 
 ### `/ck:init` — Register a Project
 ```bash
-node "$HOME/.claude/skills/ck/commands/init.mjs"
+node "$HOME/.mcode/skills/ck/commands/init.mjs"
 ```
 The script outputs JSON with auto-detected info. Present it as a confirmation draft:
 ```
@@ -46,7 +46,7 @@ Repo:        <repo or "none">
 ```
 Wait for user approval. Apply any edits. Then pipe confirmed JSON to save.mjs --init:
 ```bash
-echo '<confirmed-json>' | node "$HOME/.claude/skills/ck/commands/save.mjs" --init
+echo '<confirmed-json>' | node "$HOME/.mcode/skills/ck/commands/save.mjs" --init
 ```
 Confirmed JSON schema: `{"name":"...","path":"...","description":"...","stack":["..."],"goal":"...","constraints":["..."],"repo":"..." }`
 
@@ -64,7 +64,7 @@ Confirmed JSON schema: `{"name":"...","path":"...","description":"...","stack":[
 Show a draft summary to the user: `"Session: '<summary>' — save this? (yes / edit)"`
 Wait for confirmation. Then pipe to save.mjs:
 ```bash
-echo '<json>' | node "$HOME/.claude/skills/ck/commands/save.mjs"
+echo '<json>' | node "$HOME/.mcode/skills/ck/commands/save.mjs"
 ```
 JSON schema (exact): `{"summary":"...","leftOff":"...","nextSteps":["..."],"decisions":[{"what":"...","why":"..."}],"blockers":["..."]}`
 Display the script's stdout confirmation verbatim.
@@ -73,7 +73,7 @@ Display the script's stdout confirmation verbatim.
 
 ### `/ck:resume [name|number]` — Full Briefing
 ```bash
-node "$HOME/.claude/skills/ck/commands/resume.mjs" [arg]
+node "$HOME/.mcode/skills/ck/commands/resume.mjs" [arg]
 ```
 Display output verbatim. Then ask: "Continue from here? Or has anything changed?"
 If user reports changes → run `/ck:save` immediately.
@@ -82,7 +82,7 @@ If user reports changes → run `/ck:save` immediately.
 
 ### `/ck:info [name|number]` — Quick Snapshot
 ```bash
-node "$HOME/.claude/skills/ck/commands/info.mjs" [arg]
+node "$HOME/.mcode/skills/ck/commands/info.mjs" [arg]
 ```
 Display output verbatim. No follow-up question.
 
@@ -90,7 +90,7 @@ Display output verbatim. No follow-up question.
 
 ### `/ck:list` — Portfolio View
 ```bash
-node "$HOME/.claude/skills/ck/commands/list.mjs"
+node "$HOME/.mcode/skills/ck/commands/list.mjs"
 ```
 Display output verbatim. If user replies with a number or name → run `/ck:resume`.
 
@@ -101,7 +101,7 @@ First resolve the project name (run `/ck:list` if needed).
 Ask: `"This will permanently delete context for '<name>'. Are you sure? (yes/no)"`
 If yes:
 ```bash
-node "$HOME/.claude/skills/ck/commands/forget.mjs" [name]
+node "$HOME/.mcode/skills/ck/commands/forget.mjs" [name]
 ```
 Display confirmation verbatim.
 
@@ -109,11 +109,11 @@ Display confirmation verbatim.
 
 ### `/ck:migrate` — Convert v1 Data to v2
 ```bash
-node "$HOME/.claude/skills/ck/commands/migrate.mjs"
+node "$HOME/.mcode/skills/ck/commands/migrate.mjs"
 ```
 For a dry run first:
 ```bash
-node "$HOME/.claude/skills/ck/commands/migrate.mjs" --dry-run
+node "$HOME/.mcode/skills/ck/commands/migrate.mjs" --dry-run
 ```
 Display output verbatim. Migrates all v1 CONTEXT.md + meta.json files to v2 context.json.
 Originals are backed up as `meta.json.v1-backup` — nothing is deleted.
@@ -122,21 +122,21 @@ Originals are backed up as `meta.json.v1-backup` — nothing is deleted.
 
 ## SessionStart Hook
 
-The hook at `~/.claude/skills/ck/hooks/session-start.mjs` must be registered in
-`~/.claude/settings.json` to auto-load project context on session start:
+The hook at `~/.mcode/skills/ck/hooks/session-start.mjs` must be registered in
+`~/.mcode/settings.json` to auto-load project context on session start:
 
 ```json
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "node \"~/.claude/skills/ck/hooks/session-start.mjs\"" }] }
+      { "hooks": [{ "type": "command", "command": "node \"~/.mcode/skills/ck/hooks/session-start.mjs\"" }] }
     ]
   }
 }
 ```
 
 The hook injects ~100 tokens per session (compact 5-line summary). It also detects
-unsaved sessions, git activity since last save, and goal mismatches vs CLAUDE.md.
+unsaved sessions, git activity since last save, and goal mismatches vs MCODE.md.
 
 ---
 

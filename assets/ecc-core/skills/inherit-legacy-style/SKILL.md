@@ -1,6 +1,6 @@
 ---
 name: inherit-legacy-style
-description: Prevent AI style drift on legacy projects by scanning the codebase for implicit conventions, resolving conflicts with the operator one at a time, and writing an enforceable .ai-style-rules.md (Golden Files, naming rules, DONTs) plus an optional CLAUDE.md hook. Use when onboarding an AI agent onto a hand-written legacy codebase or extracting a project's unwritten coding rules.
+description: Prevent AI style drift on legacy projects by scanning the codebase for implicit conventions, resolving conflicts with the operator one at a time, and writing an enforceable .ai-style-rules.md (Golden Files, naming rules, DONTs) plus an optional MCODE.md hook. Use when onboarding an AI agent onto a hand-written legacy codebase or extracting a project's unwritten coding rules.
 metadata:
   origin: community
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, AskUserQuestion
@@ -24,7 +24,7 @@ Use this skill when you need to preserve legacy project style and prevent AI-gen
 ## Prerequisites
 
 - Git (recommended; non-Git projects fall back to file timestamps for incremental mode)
-- Read/Write access to the project root (generates `.ai-style-rules.md` and optionally `CLAUDE.md`)
+- Read/Write access to the project root (generates `.ai-style-rules.md` and optionally `MCODE.md`)
 
 ## Workflow
 
@@ -89,7 +89,7 @@ Ask the user for enforcement strength (use `AskUserQuestion`):
 
 | Option | Mechanism |
 |---|---|
-| **1** Soft hook (recommended) | Write `@.ai-style-rules.md` reference into project `CLAUDE.md` |
+| **1** Soft hook (recommended) | Write `@.ai-style-rules.md` reference into project `MCODE.md` |
 | **2** Hard hook | Soft hook + `PreToolUse[Write\|Edit\|MultiEdit]` Hook in `settings.json` |
 | **3** No hook | Keep the rules file; user references manually |
 
@@ -103,7 +103,7 @@ Ask the user for enforcement strength (use `AskUserQuestion`):
 
 ### Per-Turn Enforcement
 
-When `.ai-style-rules.md` is in context (loaded via CLAUDE.md), every code-writing task must open with a **compliance declaration** in the reasoning chain, naming the exemplar being followed and the DONTs being avoided.
+When `.ai-style-rules.md` is in context (loaded via MCODE.md), every code-writing task must open with a **compliance declaration** in the reasoning chain, naming the exemplar being followed and the DONTs being avoided.
 
 ## How It Works
 
@@ -111,12 +111,12 @@ This skill auto-detects whether it's a first-time or incremental run via `.ai-st
 
 - **First-time (Branch A)** — Measures project scale, scans codebase across 4 meta-architecture dimensions (File Anatomy, State & Control Flow, Infrastructure, Error Handling), applies signal-threshold noise reduction to suppress weak conflicts, resolves strong-signal conflicts one-at-a-time with the user, generates `.ai-style-rules.md` with Golden Files / Naming Rules / DONTs, and offers optional enforcement hooks.
 - **Incremental (Branch B)** — Reads existing rules, checks recent Git diffs for new or conflicting patterns, runs the same one-at-a-time grilling protocol for any conflicts found, and appends evolution logs without overwriting existing rules.
-- **Per-Turn Enforcement** — When hooked via `CLAUDE.md`, every code-writing task opens with a compliance declaration naming the exemplar followed and the DONTs avoided.
+- **Per-Turn Enforcement** — When hooked via `MCODE.md`, every code-writing task opens with a compliance declaration naming the exemplar followed and the DONTs avoided.
 
 ## Output Specification
 
 - `.ai-style-rules.md` at project root (with commit fingerprint + scale tier in header)
-- Optionally `CLAUDE.md` with `@.ai-style-rules.md` reference
+- Optionally `MCODE.md` with `@.ai-style-rules.md` reference
 - Evolution logs appended as `### [YYYY-MM-DD] Style Evolution Log` entries
 
 ## Anti-Patterns
@@ -134,11 +134,11 @@ This skill auto-detects whether it's a first-time or incremental run via `.ai-st
 - For large projects, read `--stat` summaries first, then targeted `Read` on suspect files
 - Let the signal threshold handle noise — a 843-vs-8 naming split should auto-resolve without user interruption
 - When in doubt about signal strength, lean toward asking
-- The CLAUDE.md soft hook (`@.ai-style-rules.md`) is usually sufficient; hard hook only if the user wants mechanical enforcement
+- The MCODE.md soft hook (`@.ai-style-rules.md`) is usually sufficient; hard hook only if the user wants mechanical enforcement
 
 ## Related Skills
 
-- `init` — initialize a new CLAUDE.md with codebase documentation
+- `init` — initialize a new MCODE.md with codebase documentation
 - `code-review` — review diffs for correctness and style issues
 - `simplify` — review code for reuse and simplification opportunities
 
@@ -152,6 +152,6 @@ This skill auto-detects whether it's a first-time or incremental run via `.ai-st
    - User: "We added a new module; keep existing style rules intact."
    - Action: Run Branch B incremental sniff → compare Git deltas to recorded rules → grill any new conflicts → append evolution log without overwriting.
 
-3. **Enforcing DONTs via CLAUDE.md**
+3. **Enforcing DONTs via MCODE.md**
    - User: "Make sure all new code stays consistent with the project's rules."
    - Action: Soft hook installed → `.ai-style-rules.md` auto-loaded every session → every code-writing task opens with compliance declaration, reusing exemplar patterns and avoiding DONTs.

@@ -23,7 +23,7 @@ metadata:
 set -euo pipefail
 
 REPO_SCAN_COMMIT=2742664ebcad1450c208eda0ae45d3c17fad5dd8
-REPO_SCAN_INSTALL_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/repo-scan"
+REPO_SCAN_INSTALL_DIR="${MCODE_CONFIG_DIR:-$HOME/.mcode}/skills/repo-scan"
 REPO_SCAN_INSTALL_PARENT="$(dirname "$REPO_SCAN_INSTALL_DIR")"
 mkdir -p "$REPO_SCAN_INSTALL_PARENT"
 REPO_SCAN_TMP="$(mktemp -d "$REPO_SCAN_INSTALL_PARENT/.repo-scan-install.XXXXXX")"

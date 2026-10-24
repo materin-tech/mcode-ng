@@ -9,7 +9,7 @@ use mcode_core::message::{Conversation, Message};
 use mcode_core::sessions::SessionStore;
 use std::sync::Arc;
 
-/// 系统提示（TUI 复用；对齐 CC 的「以当前工作区为根干活」基线）。
+/// 系统提示（TUI 复用；以当前工作区为根干活）。
 pub fn system_prompt(cwd: &std::path::Path) -> Vec<String> {
     vec![format!(
         "你是 MCode，运行在用户机器上的终端编码代理。\
@@ -39,7 +39,7 @@ pub fn turn_opts(
                 .map(|d| d.to_spec())
                 .collect(),
         )
-        // 0 = 不限轮数（CC 交互态）；print 模式同交互态。
+        // 0 = 不限轮数；print 模式同交互态。
         .with_max_turns(0);
     if let Some(m) = model_override {
         opts = opts.with_model(m);

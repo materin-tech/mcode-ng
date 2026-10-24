@@ -1,24 +1,24 @@
 ---
-name: claude-devfleet
-description: Orchestrate multi-agent coding tasks via Claude DevFleet — plan projects, dispatch parallel agents in isolated worktrees, monitor progress, and read structured reports. Use when dispatching parallel coding agents across isolated worktrees and tracking their reports.
+name: mcode-devfleet
+description: Orchestrate multi-agent coding tasks via MCode DevFleet — plan projects, dispatch parallel agents in isolated worktrees, monitor progress, and read structured reports. Use when dispatching parallel coding agents across isolated worktrees and tracking their reports.
 metadata:
   origin: community
 ---
 
-# Claude DevFleet Multi-Agent Orchestration
+# MCode DevFleet Multi-Agent Orchestration
 
 ## When to Use
 
-Use this skill when you need to dispatch multiple Claude Code agents to work on coding tasks in parallel. Each agent runs in an isolated git worktree with full tooling.
+Use this skill when you need to dispatch multiple MCode agents to work on coding tasks in parallel. Each agent runs in an isolated git worktree with full tooling.
 
 ## Setup
 
 The DevFleet server is a separate project, not bundled with ECC. Install and
-run it from its repository first: <https://github.com/LEC-AI/claude-devfleet>
+run it from its repository first: <https://github.com/LEC-AI/mcode-devfleet>
 
 Then connect the running instance via MCP:
 ```bash
-claude mcp add devfleet --transport http http://localhost:18801/mcp
+mcode mcp add devfleet --transport http http://localhost:18801/mcp
 ```
 
 Before first use, verify the process listening on port 18801 is the DevFleet

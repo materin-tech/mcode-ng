@@ -1,6 +1,6 @@
 ---
 name: deepseek-harness-setup
-description: "Install and operate Everything Claude Code (ECC) on the DeepSeek Harness (DSH): native skill roots (~/.dsh/skills, .agents/skills), the @deepseek-ai/dsh-hooks-claude-code bridge for command hooks, bare-insert patch mounting, generator usage, event-support limits, and update workflow. Use when setting up ECC on DeepSeek Harness, wiring ECC hooks into a DSH profile, or debugging why ECC skills or hooks do not appear in a DSH session."
+description: "Install and operate Everything MCode (ECC) on the DeepSeek Harness (DSH): native skill roots (~/.dsh/skills, .agents/skills), the @deepseek-ai/dsh-hooks-mcode bridge for command hooks, bare-insert patch mounting, generator usage, event-support limits, and update workflow. Use when setting up ECC on DeepSeek Harness, wiring ECC hooks into a DSH profile, or debugging why ECC skills or hooks do not appear in a DSH session."
 metadata:
   origin: community
 ---
@@ -37,7 +37,7 @@ Run ECC on the DeepSeek Harness. Full guide: `docs/DEEPSEEK-HARNESS-GUIDE.md`.
    ```
 
    The generator lower-cases tool-name matchers, prefixes
-   `CLAUDE_PLUGIN_ROOT`/`ECC_PLUGIN_ROOT` inline (the bridge does not export
+   `MCODE_PLUGIN_ROOT`/`ECC_PLUGIN_ROOT` inline (the bridge does not export
    the plugin root), preserves timeouts, and skips events DSH cannot bridge:
    `PreCompact`, `PostToolUseFailure`, `SessionEnd`.
 
@@ -45,8 +45,8 @@ Run ECC on the DeepSeek Harness. Full guide: `docs/DEEPSEEK-HARNESS-GUIDE.md`.
 
    ```yaml
    - insert:
-       - id: ecc-hooks-claude-code
-         name: "@deepseek-ai/dsh-hooks-claude-code"
+       - id: ecc-hooks-mcode
+         name: "@deepseek-ai/dsh-hooks-mcode"
          config:
            configPath: /absolute/path/to/hooks-dsh.json
    ```
@@ -81,7 +81,7 @@ config with the same generator command. If the ECC checkout moves, regenerate
 |---------|---------------|
 | Skills | Native discovery; workflows may require host adaptation |
 | Hooks | 23 command hooks on 5 of 7 bridge events |
-| Slash commands | Not available (Claude Code mechanism); workflows covered by skills |
+| Slash commands | Not available (MCode mechanism); workflows covered by skills |
 | Agents | Native dispatch unverified; use canonical prompt guidance only after review |
 
 The validated setup here targets the CLI/web profile. Desktop profiles have a separate

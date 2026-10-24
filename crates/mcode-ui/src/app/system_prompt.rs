@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Materin-tech. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-//! 系统提示词组装（对齐 CLI agent/context.ts）：身份 + 决策策略 + 规则 +
+//! 系统提示词组装：身份 + 决策策略 + 规则 +
 //! 语言 + 工具清单 + skill 索引 + goal + MCODE.md + subagent 协议 + PUA 注入。
 
 use mcode_core::config::Language;
@@ -101,7 +101,7 @@ pub fn build_system_prompt(opts: SystemPromptOpts) -> String {
     lines.join("\n")
 }
 
-/// MCODE.md 记忆文档：项目向上搜索 + 全局，20k 字符合并预算（对齐 CLI mdoc.ts）
+/// MCODE.md 记忆文档：项目向上搜索 + 全局，20k 字符合并预算
 pub fn load_project_doc(cwd: &std::path::Path) -> Option<String> {
     let mut parts = vec![];
     let mut used = 0usize;

@@ -305,7 +305,7 @@ impl ToolRegistry {
 // 输入校验 + 输出钳制
 // ---------------------------------------------------------------------------
 
-/// 轻量 JSON-schema 校验：required + 类型 + 未知参数（对齐 CC validate）。
+/// 轻量 JSON-schema 校验：required + 类型 + 未知参数。
 pub fn validate_input(
     tool: &ToolDefinition,
     input: &serde_json::Value,
@@ -350,14 +350,14 @@ pub fn validate_input(
     Ok(())
 }
 
-/// 工具产出钳制阈值（对齐 CC）。
+/// 工具产出钳制阈值。
 pub const MAX_TOOL_OUTPUT_CHARS: usize = 30_000;
 
 /// 硬上限（超过直接拒绝入库——比如 read 到疯狂输出）。
 pub const MAX_TOOL_OUTPUT_HARD: usize = 3_000_000;
 
 /// 钳制：≤阈值原样返回；超限落盘 `~/.mcode/tool-outputs/<id>.txt` 并在尾部
-/// 提示完整输出路径（模型可 read_file 取回）——信息不灭，对齐 CC 行为。
+/// 提示完整输出路径（模型可 read_file 取回）——信息不灭。
 pub fn clamp_output(shared: &ToolSharedState, s: String) -> String {
     let len = s.chars().count();
     if len <= MAX_TOOL_OUTPUT_CHARS {

@@ -1,6 +1,6 @@
 ---
 name: unified-memory
-description: Share durable, inspectable context and handoffs between Claude, Codex, Hermes, Cursor, OpenCode, and other agents through the local ECC Memory Vault. Use when an agent must save work state, transfer context, resume another agent's task, or search shared project knowledge.
+description: Share durable, inspectable context and handoffs between MCode, Codex, Hermes, Cursor, OpenCode, and other agents through the local ECC Memory Vault. Use when an agent must save work state, transfer context, resume another agent's task, or search shared project knowledge.
 metadata:
   origin: ECC
 ---
@@ -14,7 +14,7 @@ harness-specific transcripts or inboxes.
 ## Runtime Prerequisite
 
 This skill is guidance, not the Memory Vault executable. Skill-only, minimal,
-manual, and Claude plugin installs do not create the required commands on
+manual, and MCode plugin installs do not create the required commands on
 `PATH`. Install the `ecc-universal` npm runtime separately before using the CLI
 or MCP examples:
 
@@ -31,7 +31,7 @@ A repository checkout may instead run the CLI as
 ## When To Use
 
 - Save durable context that another agent or later session will need.
-- Hand work from Claude to Codex, Hermes to Claude, or any other harness pair.
+- Hand work from MCode to Codex, Hermes to MCode, or any other harness pair.
 - Resume a task and search for prior decisions, facts, lessons, or handoffs.
 - Diagnose malformed memories, broken links, duplicate IDs, or skipped
   symbolic links.
@@ -130,7 +130,7 @@ Write a handoff when another harness should continue the task:
 ```bash
 ecc memory handoff \
   --from codex \
-  --target claude \
+  --target mcode \
   --title "Finish authentication rollout" \
   --body-file handoff.md
 ```

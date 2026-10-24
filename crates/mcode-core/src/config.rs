@@ -76,7 +76,7 @@ pub struct Provider {
     /// 字段静默丢失，必须显式 rename 对齐。
     #[serde(rename = "baseURL")]
     pub base_url: String,
-    /// 环境变量名；不是合法变量名则按明文 key 兜底（对齐 CLI resolveApiKey）
+    /// 环境变量名；不是合法变量名则按明文 key 兜底
     pub api_key_env: String,
     pub models: Vec<String>,
     /// 接受图片输入的模型名单；不在名单内的模型拒绝图片附件并降级文本
@@ -87,7 +87,7 @@ pub struct Provider {
 
 impl Provider {
     /// 解析 API key：优先环境变量；值不是合法变量名时按明文兜底
-    /// （对齐 TS config.ts resolveApiKey）。
+    /// 环境变量优先，非法变量名按明文兜底。
     pub fn resolve_api_key(&self) -> Option<String> {
         let v = self.api_key_env.as_str();
         if v.is_empty() {
@@ -133,11 +133,11 @@ pub struct Config {
     pub default_mode: Mode,
     /// 会话保留天数：超过 N 天未活动的会话启动时自动删除
     pub session_retention_days: u32,
-    /// 主模型不可用时的降级链（对齐 CC --fallback-model）。
+    /// 主模型不可用时的降级链（见 --fallback-model）。
     /// 按序尝试；API 层按错误分类决定是否降级（Auth/Billing 不降级）。
     #[serde(default)]
     pub fallback_models: Vec<String>,
-    /// 启动时注入的环境变量（对齐 CC settings env 段）。
+    /// 启动时注入的环境变量。
     #[serde(default)]
     pub env: BTreeMap<String, String>,
 }
@@ -214,7 +214,7 @@ impl Config {
         self.providers.is_empty()
     }
 
-    /// 供应商就绪检查（每回合评估，永不缓存——对齐 CLI providerIssue）。
+    /// 供应商就绪检查（每回合评估，永不缓存）。
     pub fn provider_ready(&self) -> anyhow::Result<()> {
         let p = self
             .active_provider()
@@ -501,7 +501,7 @@ pub enum McpTransport {
     Http(String),
 }
 
-/// hook 规则：事件 + 工具匹配器 + 命令。8 事件对齐 CC；旧文件只含
+/// hook 规则：事件 + 工具匹配器 + 命令。8 种事件；旧文件只含
 /// pre_tool_use/post_tool_use/stop 三种值，serde 兼容。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

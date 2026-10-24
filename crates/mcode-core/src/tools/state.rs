@@ -1,6 +1,6 @@
 //! 会话级工具状态：read-before-write 追踪 / bash 会话 / todo 列表。
 //!
-//! read-before-write 对齐 CC 核心安全机制：edit_file / write_file 覆盖已有
+//! read-before-write 安全机制：edit_file / write_file 覆盖已有
 //! 文件前，必须先用 read_file 读过，且读之后文件没被外部改动
 //! （mtime/size 指纹校验）——防止模型基于过期内容盲写。
 

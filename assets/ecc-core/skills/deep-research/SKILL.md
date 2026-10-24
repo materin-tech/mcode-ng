@@ -27,7 +27,7 @@ At least one of:
 - **firecrawl** — `firecrawl_search`, `firecrawl_scrape`, `firecrawl_crawl`
 - **exa** — `web_search_exa`, `web_search_advanced_exa`, `crawling_exa`
 
-Both together give the best coverage. Configure in `~/.claude.json` or `~/.codex/config.toml`.
+Both together give the best coverage. Configure in `~/.mcode.json` or `~/.codex/config.toml`.
 
 ## Untrusted Sources
 
@@ -139,7 +139,7 @@ Sub-questions investigated: [list]
 
 ## Parallel Research with Subagents
 
-For broad topics, use Claude Code's Task tool to parallelize:
+For broad topics, use MCode's Task tool to parallelize:
 
 ```
 Launch 3 research agents in parallel:

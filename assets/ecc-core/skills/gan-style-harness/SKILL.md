@@ -8,7 +8,7 @@ tools: Read, Write, Edit, Bash, Grep, Glob, Task
 
 # GAN-Style Harness Skill
 
-> Inspired by [Anthropic's Harness Design for Long-Running Application Development](https://www.anthropic.com/engineering/harness-design-long-running-apps) (March 24, 2026)
+> Inspired by [Anthropic's Harness Design for Long-Running Application Development] (March 24, 2026)
 
 A multi-agent harness that separates **generation** from **evaluation**, creating an adversarial feedback loop that drives quality far beyond what a single agent can achieve.
 
@@ -28,7 +28,7 @@ This is the same dynamic as GANs (Generative Adversarial Networks): the Generato
 
 ## When NOT to Use
 
-- Quick single-file fixes (use standard `claude -p`)
+- Quick single-file fixes (use standard `mcode -p`)
 - Tasks with tight budget constraints (<$10)
 - Simple refactoring (use de-sloppify pattern instead)
 - Tasks that are already well-specified with tests (use TDD workflow)
@@ -175,20 +175,20 @@ GAN_EVAL_CRITERIA="functionality,performance,security" \
 ./scripts/gan-harness.sh "Build a REST API for task management"
 ```
 
-### Via Claude Code (Manual)
+### Via MCode (Manual)
 
 ```bash
 # Step 1: Plan
-claude -p --model sonnet "You are a Product Planner. Read PLANNER_PROMPT.md. Expand this brief into a full product spec: 'Build a Kanban board app'. Write spec to spec.md"
+mcode -p --model sonnet "You are a Product Planner. Read PLANNER_PROMPT.md. Expand this brief into a full product spec: 'Build a Kanban board app'. Write spec to spec.md"
 
 # Step 2: Generate (iteration 1)
-claude -p --model sonnet "You are a Generator. Read spec.md. Implement Sprint 1. Start the dev server on port 3000."
+mcode -p --model sonnet "You are a Generator. Read spec.md. Implement Sprint 1. Start the dev server on port 3000."
 
 # Step 3: Evaluate (iteration 1)
-claude -p --model sonnet --allowedTools "Read,Bash,mcp__playwright__*" "You are an Evaluator. Read EVALUATOR_PROMPT.md. Test the live app at http://localhost:3000. Score against the rubric. Write feedback to feedback-001.md"
+mcode -p --model sonnet --allowedTools "Read,Bash,mcp__playwright__*" "You are an Evaluator. Read EVALUATOR_PROMPT.md. Test the live app at http://localhost:3000. Score against the rubric. Write feedback to feedback-001.md"
 
 # Step 4: Generate (iteration 2 — reads feedback)
-claude -p --model sonnet "You are a Generator. Read spec.md and feedback-001.md. Address all issues. Improve the scores."
+mcode -p --model sonnet "You are a Generator. Read spec.md and feedback-001.md. Address all issues. Improve the scores."
 
 # Repeat steps 3-4 until pass threshold met
 ```
@@ -255,7 +255,7 @@ The harness should simplify as models improve. Following Anthropic's evolution:
 
 5. **Evaluator praising its own fixes** — Never let the evaluator suggest fixes and then evaluate those fixes. The evaluator only critiques; the generator fixes.
 
-6. **Context exhaustion** — For long sessions, use Claude Agent SDK's automatic compaction or reset context between major phases.
+6. **Context exhaustion** — For long sessions, use MCode Agent SDK's automatic compaction or reset context between major phases.
 
 ## Results: What to Expect
 
@@ -273,7 +273,7 @@ Based on Anthropic's published results:
 
 ## References
 
-- [Anthropic: Harness Design for Long-Running Apps](https://www.anthropic.com/engineering/harness-design-long-running-apps) — Original paper by Prithvi Rajasekaran
+- [Anthropic: Harness Design for Long-Running Apps] — Original paper by Prithvi Rajasekaran
 - [Epsilla: The GAN-Style Agent Loop](https://www.epsilla.com/blogs/anthropic-harness-engineering-multi-agent-gan-architecture) — Architecture deconstruction
 - [Martin Fowler: Harness Engineering](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) — Broader industry context
 - [OpenAI: Harness Engineering](https://openai.com/index/harness-engineering/) — OpenAI's parallel work

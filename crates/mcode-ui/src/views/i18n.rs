@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 //! 桌面端 UI 字符串表 — 5 语言（zh_CN / zh_TW / en_US / ja_JP / ko_KR），
-//! 口径对齐 CLI locales.ts：组件只消费键，新增语言 = 加一张表。
+//! 组件只消费键，新增语言 = 加一张表。
 
 use mcode_core::config::Language;
 
@@ -205,7 +205,7 @@ const EN_US: S = S {
     disable: "Disable",
 };
 
-// zh_TW / ja_JP / ko_KR：基表 + 覆盖键（对齐 CLI locales.ts 的展开口径）
+// zh_TW / ja_JP / ko_KR：基表 + 覆盖键展开
 const ZH_TW: S = S {
     settings_title: "⚙ 設定中心",
     extensions_title: "🧩 擴充生態",

@@ -1,13 +1,13 @@
 ---
 name: plankton-code-quality
-description: "Write-time code quality enforcement using Plankton — auto-formatting, linting, and Claude-powered fixes on every file edit via hooks. Use when setting up write-time formatting, linting, or auto-fix hooks on file edits."
+description: "Write-time code quality enforcement using Plankton — auto-formatting, linting, and MCode-powered fixes on every file edit via hooks. Use when setting up write-time formatting, linting, or auto-fix hooks on file edits."
 metadata:
   origin: community
 ---
 
 # Plankton Code Quality Skill
 
-Integration reference for Plankton (credit: @alxfazio), a write-time code quality enforcement system for Claude Code. Plankton runs formatters and linters on every file edit via PostToolUse hooks, then spawns Claude subprocesses to fix violations the agent didn't catch.
+Integration reference for Plankton (credit: @alxfazio), a write-time code quality enforcement system for MCode. Plankton runs formatters and linters on every file edit via PostToolUse hooks, then spawns MCode subprocesses to fix violations the agent didn't catch.
 
 ## When to Use
 
@@ -20,7 +20,7 @@ Integration reference for Plankton (credit: @alxfazio), a write-time code qualit
 
 ### Three-Phase Architecture
 
-Every time Claude Code edits or writes a file, Plankton's `multi_linter.sh` PostToolUse hook runs:
+Every time MCode edits or writes a file, Plankton's `multi_linter.sh` PostToolUse hook runs:
 
 ```
 Phase 1: Auto-Format (Silent)
@@ -34,7 +34,7 @@ Phase 2: Collect Violations (JSON)
 └─ Still no output to main agent
 
 Phase 3: Delegate + Verify
-├─ Spawns claude -p subprocess with violations JSON
+├─ Spawns mcode -p subprocess with violations JSON
 ├─ Routes to model tier based on violation complexity:
 │   ├─ Haiku: formatting, imports, style (E/W/F codes) — 120s timeout
 │   ├─ Sonnet: complexity, refactoring (C901, PLR codes, oxlint complexity) — 300s timeout
@@ -82,18 +82,18 @@ brew install jaq ruff uv
 # Install Python linters
 uv sync --all-extras
 
-# Start Claude Code — hooks activate automatically
-claude
+# Start MCode — hooks activate automatically
+mcode
 ```
 
-No install command, no plugin config. The hooks in `.claude/settings.json` are picked up automatically when you run Claude Code in the Plankton directory.
+No install command, no plugin config. The hooks in `.mcode/settings.json` are picked up automatically when you run MCode in the Plankton directory.
 
 ### Per-Project Integration
 
 To use Plankton hooks in your own project:
 
-1. Copy `.claude/hooks/` directory to your project
-2. Copy `.claude/settings.json` hook configuration
+1. Copy `.mcode/hooks/` directory to your project
+2. Copy `.mcode/settings.json` hook configuration
 3. Copy linter config files (`.ruff.toml`, `biome.json`, etc.)
 4. Install the linters for your languages
 
@@ -139,7 +139,7 @@ If running both ECC and Plankton hooks:
 
 ## Configuration Reference
 
-Plankton's `.claude/hooks/config.json` controls all behavior:
+Plankton's `.mcode/hooks/config.json` controls all behavior:
 
 ```json
 {

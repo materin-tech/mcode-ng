@@ -1,6 +1,6 @@
 //! sessions —— 会话持久化：parent 链 JSONL、resume、文件快照、保留策略。
 //!
-//! 布局（对齐 CC 的 transcript 组织）：
+//! transcript 布局：
 //! - 每会话一个 JSONL：`~/.mcode/projects/<sanitized-cwd>/<session-id>.jsonl`；
 //! - 每行一条记录，`type` 内部 tagged：
 //!   `meta`（会话元信息，首行）→ `message`（父链消息）→ `snapshot`

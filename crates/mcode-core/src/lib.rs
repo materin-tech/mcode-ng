@@ -1,6 +1,6 @@
 //! MCode 新一代核心库。
 //!
-//! 顶层设计（对齐 Claude Code 的骨架语义，保留 mcode 双协议优势）：
+//! 顶层设计（保留 mcode 双协议优势）：
 //! - [`message`]：统一消息模型。会话内存、API 请求、持久化 JSONL 三方共用，
 //!   消灭旧版「富 Message 仅供 UI / 文本对仅供模型」的双真相源问题。
 //! - [`token`]：CJK 感知的 token 估算 + usage 真值滚动校准。

@@ -11,7 +11,7 @@ ECC evaluates project-local Hookify rules with its built-in Node runtime. No
 separate Hookify plugin or Python installation is required when ECC hooks are
 enabled.
 
-Hookify rules are markdown files with YAML frontmatter that define patterns to watch for and messages to show when those patterns match. Rules are stored in `.claude/hookify.{rule-name}.local.md` files.
+Hookify rules are markdown files with YAML frontmatter that define patterns to watch for and messages to show when those patterns match. Rules are stored in `.mcode/hookify.{rule-name}.local.md` files.
 
 ## Rule File Format
 
@@ -25,7 +25,7 @@ event: bash|file|stop|prompt|all
 pattern: regex-pattern-here
 ---
 
-Message to show Claude when this rule triggers.
+Message to show MCode when this rule triggers.
 Can include markdown formatting, warnings, suggestions, etc.
 ```
 
@@ -119,14 +119,14 @@ gitignored rules created locally remain active without that override.
 
 - `warn` injects the message as event-specific additional context and does not block.
 - `block` denies matching Bash, PowerShell, Write, Edit, or MultiEdit calls before execution.
-- On prompt, post-tool, and stop events, `block` uses Claude Code's structured block decision.
+- On prompt, post-tool, and stop events, `block` uses MCode's structured block decision.
 - Stop rules skip recursive `stop_hook_active` events to prevent infinite continuation loops.
 
 ## File Organization
 
-- **Location**: `.claude/` directory in project root
-- **Naming**: `.claude/hookify.{descriptive-name}.local.md`
-- **Gitignore**: Add `.claude/*.local.md` to `.gitignore`
+- **Location**: `.mcode/` directory in project root
+- **Naming**: `.mcode/hookify.{descriptive-name}.local.md`
+- **Gitignore**: Add `.mcode/*.local.md` to `.gitignore`
 
 ## Commands
 

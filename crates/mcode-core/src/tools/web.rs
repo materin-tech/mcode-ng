@@ -1,6 +1,6 @@
 //! 网络工具：web_fetch / web_search。
 //!
-//! 对齐 TS 版跨区域策略：搜索走 DuckDuckGo HTML，被限流/拦截时回落
+//! 跨区域策略：搜索走 DuckDuckGo HTML，被限流/拦截时回落
 //! Bing CN——纯 HTTP 抓取，无 API key 依赖（自建网关用户零配置可用）。
 
 use super::{DisplayBlock, Tool, ToolContext, ToolDefinition, ToolResult};

@@ -1,6 +1,6 @@
 //! 权限引擎——模式 + 规则表 + 会话记忆的单一裁决入口。
 //!
-//! 对齐 Claude Code 的三张表（deny → ask → allow）并修复旧版三个缺陷：
+//! 三张规则表（deny → ask → allow），并修复旧版三个缺陷：
 //! 1. **桶优先级**：deny 永远先于 ask/allow 胜出（旧版"首条命中即返回"，
 //!    用户先加的 allow 规则会遮蔽后加的 deny——危险）；
 //! 2. **结构化 bash 匹配**：`bash(rm *)` 用 shlex 分词做 token 级前缀匹配，
@@ -393,7 +393,7 @@ mod tests {
             pm.evaluate(&bash("git push origin main")),
             Verdict::Deny { .. }
         ));
-        // CC 语义：`前缀:*` 命中裸前缀本身（npm run test:* 匹配 `npm run test`）
+        // `前缀:*` 命中裸前缀本身（npm run test:* 匹配 `npm run test`）
         assert!(matches!(
             pm.evaluate(&bash("git push")),
             Verdict::Deny { .. }

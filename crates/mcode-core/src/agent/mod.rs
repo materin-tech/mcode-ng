@@ -61,7 +61,7 @@ pub enum AgentEvent {
         max: usize,
         reason: String,
     },
-    /// 恢复动作（降级/压缩/扩容）——CC 式 continue 点对 UI 的可见性
+    /// 恢复动作（降级/压缩/扩容）——continue 点对 UI 的可见性
     Recovering { action: String },
     /// 上下文压缩完成
     Compacted { note: String },
@@ -147,7 +147,7 @@ fn name_requests_1m(m: &str) -> bool {
     false
 }
 
-/// 自动压缩阈值：窗口的 80%（对齐 CC auto-compact）。
+/// 自动压缩阈值：窗口的 80%。
 pub fn auto_compact_threshold(model: &str) -> usize {
     context_window_for_model(model) * 4 / 5
 }
@@ -186,7 +186,7 @@ pub struct PlannedToolCall {
 
 /// 把后端 StreamEvent 流聚合成 [`Turn`]。
 ///
-/// 聚合规则（对齐 CC 的流式协议层）：
+/// 聚合规则（流式协议层）：
 /// - `ToolUseStart` 开新槽位；`ToolInputDelta` 按 id 追加 partial_json；
 ///   `ToolUseDone` 收口（覆盖 input；缺失 delta 的后端靠它兜底）；
 /// - `Done` 记录 stop_reason 并终止；流自然结束没等到 Done →

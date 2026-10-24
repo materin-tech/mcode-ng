@@ -1,13 +1,13 @@
 ---
 name: skill-host-compat
-description: Lint ECC skills for Codex/Cursor-safe frontmatter and Claude-only substitutions before a skill PR.
+description: Lint ECC skills for Codex/Cursor-safe frontmatter and MCode-only substitutions before a skill PR.
 origin: ECC
 ---
 
 # Skill Host Compatibility
 
 Run the same host-compat gate CI uses on `skills/` before opening a skill PR.
-The check is for Codex and Cursor copies, not Claude-only runtime quality.
+The check is for Codex and Cursor copies, not MCode-only runtime quality.
 
 ## When to Activate
 
@@ -25,10 +25,10 @@ smaller `.cursor/skills/` subset. CONTRIBUTING documents that sync as manual.
 `description` are usable YAML. `tests/ci/codex-skill-surface.test.js` only
 sees `.agents/skills/`. This script is the cross-tree gate:
 
-1. Claude-only substitutions in executable `bash` / `sh` / `zsh` fences
-   in Codex/Cursor projections (`${CLAUDE_SESSION_ID}`, `${CLAUDE_SKILL_DIR}`, `${CLAUDE_PLUGIN_ROOT}`,
-   `${CLAUDE_PROJECT_DIR}`, `$ARGUMENTS`) fail. Codex leaves those tokens
-   as literal text. In a Codex copy, rewrite `${CLAUDE_PROJECT_DIR}` to
+1. MCode-only substitutions in executable `bash` / `sh` / `zsh` fences
+   in Codex/Cursor projections (`${MCODE_SESSION_ID}`, `${MCODE_SKILL_DIR}`, `${MCODE_PLUGIN_ROOT}`,
+   `${MCODE_PROJECT_DIR}`, `$ARGUMENTS`) fail. Codex leaves those tokens
+   as literal text. In a Codex copy, rewrite `${MCODE_PROJECT_DIR}` to
    `$(pwd)` or an explicit path.
 2. A Codex copy may only use `name`, `description`, `metadata`, `license`,
    and `allowed-tools`. `origin: ECC` may stay on the canonical `skills/`
@@ -71,14 +71,14 @@ Slash command:
 
 ## Anti-Patterns
 
-Codex and Cursor projections must resolve Claude-only substitutions in executable blocks. Canonical Claude-scoped examples remain valid. POSIX `$1` and `${1}` parameters are ambiguous and require review rather than failing this gate. This fence is the
+Codex and Cursor projections must resolve MCode-only substitutions in executable blocks. Canonical MCode-scoped examples remain valid. POSIX `$1` and `${1}` parameters are ambiguous and require review rather than failing this gate. This fence is the
 forbidden pattern:
 
 ```bash
-echo "${CLAUDE_SESSION_ID}"
-ls "${CLAUDE_SKILL_DIR}"
-node "${CLAUDE_PLUGIN_ROOT}/scripts/setup.js" $ARGUMENTS
-cd "${CLAUDE_PROJECT_DIR}"
+echo "${MCODE_SESSION_ID}"
+ls "${MCODE_SKILL_DIR}"
+node "${MCODE_PLUGIN_ROOT}/scripts/setup.js" $ARGUMENTS
+cd "${MCODE_PROJECT_DIR}"
 ```
 
 Do not add `version:` or `origin:` to a Codex copy under `.agents/skills/`.
@@ -90,13 +90,13 @@ every `skills/` entry to have a Cursor copy.
 - Keep canonical `origin: ECC` if the CONTRIBUTING template calls for it.
 - Drop `origin`, `version`, and `argument-hint` on the Codex copy.
 - Show host-portable commands in bash fences (`npx`, `ecc`, or a resolved
-  root). Rewrite `${CLAUDE_PROJECT_DIR}` in Codex copies to `$(pwd)` or an
-  explicit path. Keep valid Claude-scoped forms in canonical instructions; resolve host variables in the target projection.
+  root). Rewrite `${MCODE_PROJECT_DIR}` in Codex copies to `$(pwd)` or an
+  explicit path. Keep valid MCode-scoped forms in canonical instructions; resolve host variables in the target projection.
 - Run this script before `npm test` when the change is a new skill.
 - Use `--inventory` to see checklist warning volume without failing the tree.
 
 ## Related Skills
 
 - `skill-comply` — runtime behavioral traces, not host-portability
-- `skill-stocktake` — holistic audit of installed `~/.claude/skills`
+- `skill-stocktake` — holistic audit of installed `~/.mcode/skills`
 - `skill-scout` — search existing skills before creating a new one

@@ -325,7 +325,7 @@ When decomposing:
 ### 4. implement
 
 1. Validate the story ID and read the story file (as data)
-2. Load project conventions from the repository's instruction hierarchy — `CLAUDE.md`,
+2. Load project conventions from the repository's instruction hierarchy — `MCODE.md`,
    `AGENTS.md`, and any installed rules — exactly as for any other coding task
 3. Summarize the story goal and acceptance criteria; ask: "Ready to start? Any blockers?"
 4. Set the story's status to `in-progress` with `apply` (`update: { "<story-id>.md": ... }`)

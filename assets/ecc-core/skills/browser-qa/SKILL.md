@@ -1,6 +1,6 @@
 ---
 name: browser-qa
-description: "Run automated post-deploy UI verification with a browser automation MCP (claude-in-chrome, Playwright, or Puppeteer): console-error and Core Web Vitals smoke checks, form and auth-flow interaction tests, screenshot visual regression across three breakpoints, and axe-core accessibility audits ending in a SHIP / DO-NOT-SHIP verdict. Use when testing a deployed feature on staging or preview, before shipping frontend changes, reviewing a frontend PR, or checking responsive layout and accessibility."
+description: "Run automated post-deploy UI verification with a browser automation MCP (mcode-in-chrome, Playwright, or Puppeteer): console-error and Core Web Vitals smoke checks, form and auth-flow interaction tests, screenshot visual regression across three breakpoints, and axe-core accessibility audits ending in a SHIP / DO-NOT-SHIP verdict. Use when testing a deployed feature on staging or preview, before shipping frontend changes, reviewing a frontend PR, or checking responsive layout and accessibility."
 metadata:
   origin: ECC
 ---
@@ -17,7 +17,7 @@ metadata:
 
 ## How It Works
 
-Uses the browser automation MCP (claude-in-chrome, Playwright, or Puppeteer) to interact with live pages like a real user.
+Uses the browser automation MCP (mcode-in-chrome, Playwright, or Puppeteer) to interact with live pages like a real user.
 
 ### Safety first — blast radius (run read-only by default)
 
@@ -98,7 +98,7 @@ credentials/tokens/PII before saving any screenshot.
 ## Integration
 
 Works with any browser MCP:
-- `mChild__claude-in-chrome__*` tools (preferred — uses your actual Chrome)
+- `mChild__chrome__*` tools (preferred — uses your actual Chrome)
 - Playwright via `mcp__browserbase__*`
 - Direct Puppeteer scripts
 

@@ -1,7 +1,7 @@
-//! agent 主循环 + CC 式恢复 continue 点。
+//! agent 主循环 + 恢复 continue 点。
 //!
 //! 职责：把「流式请求 → 聚合 → 工具执行 → 结果回填」循环起来，并在每个
-//! 可恢复的失败点上选择与 Claude Code 一致的恢复动作：
+//! 可恢复的失败点上一一对应的恢复动作：
 //!
 //! | 错误类别                          | 恢复动作                                   |
 //! |-----------------------------------|--------------------------------------------|
@@ -29,7 +29,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 /// 流式请求最大原样重试次数（之后切换 fallback 模型）。
 pub const MAX_STREAM_RETRIES: usize = 5;
 
-/// 只读工具并行度（CC 同量级）。
+/// 只读工具并行度。
 pub const PARALLEL_READ_TOOLS: usize = 10;
 
 /// 默认单回合输出上限（tokens）。
@@ -419,7 +419,7 @@ pub async fn run_agent_turn(
                 // 自然收尾
                 if turn.tool_calls.is_empty() {
                     // continue 点：Stop hook 阻断 → reason 作为新 user 消息注入，
-                    // 强迫模型继续（对齐 CC Stop hook 的 continue 语义）
+                    // 强迫模型继续（Stop hook 的 continue 语义）
                     if let Some(hooks) = deps
                         .hooks
                         .as_ref()
@@ -776,7 +776,7 @@ async fn run_one_tool(
         },
     };
     let verdict = if hook_skip_perm {
-        Verdict::Allow // hook 已批准：跳过权限询问（CC permissionDecision=allow 语义）
+        Verdict::Allow // hook 已批准：跳过权限询问（permissionDecision=allow 语义）
     } else if hook_force_ask {
         Verdict::Confirm // hook 要求强制确认（permissionDecision=ask 语义）
     } else {
@@ -1790,7 +1790,7 @@ mod tests {
     #[tokio::test]
     async fn pre_tool_use_allow_skips_permission_confirm() {
         // EchoTool 非只读 → Passon 模式本应走 Confirm；无确认通道时会被跳过。
-        // hook permissionDecision=allow → 跳过权限询问直接执行（CC 语义）。
+        // hook permissionDecision=allow → 跳过权限询问直接执行。
         let (reg, counter) = echo_registry();
         let mut h = TestHarness::with_registry("m", vec![], reg);
         assert!(h.deps.confirm.is_none());

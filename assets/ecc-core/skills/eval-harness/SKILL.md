@@ -8,12 +8,12 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 
 # Eval Harness Skill
 
-A formal evaluation framework for Claude Code sessions, implementing eval-driven development (EDD) principles.
+A formal evaluation framework for MCode sessions, implementing eval-driven development (EDD) principles.
 
 ## When to Activate
 
 - Setting up eval-driven development (EDD) for AI-assisted workflows
-- Defining pass/fail criteria for Claude Code task completion
+- Defining pass/fail criteria for MCode task completion
 - Measuring agent reliability with pass@k metrics
 - Creating regression test suites for prompt or agent changes
 - Benchmarking agent performance across model versions
@@ -29,10 +29,10 @@ Eval-Driven Development treats evals as the "unit tests of AI development":
 ## Eval Types
 
 ### Capability Evals
-Test if Claude can do something it couldn't before:
+Test if MCode can do something it couldn't before:
 ```markdown
 [CAPABILITY EVAL: feature-name]
-Task: Description of what Claude should accomplish
+Task: Description of what MCode should accomplish
 Success Criteria:
   - [ ] Criterion 1
   - [ ] Criterion 2
@@ -68,7 +68,7 @@ npm run build && echo "PASS" || echo "FAIL"
 ```
 
 ### 2. Model-Based Grader
-Use Claude to evaluate open-ended outputs:
+Use MCode to evaluate open-ended outputs:
 ```markdown
 [MODEL GRADER PROMPT]
 Evaluate the following code change:
@@ -169,7 +169,7 @@ Status: READY FOR REVIEW
 ```
 /eval define feature-name
 ```
-Creates eval definition file at `.claude/evals/feature-name.md`
+Creates eval definition file at `.mcode/evals/feature-name.md`
 
 ### During Implementation
 ```
@@ -187,7 +187,7 @@ Generates full eval report
 
 Store evals in project:
 ```
-.claude/
+.mcode/
   evals/
     feature-xyz.md      # Eval definition
     feature-xyz.log     # Eval run history
@@ -300,6 +300,6 @@ Recommended thresholds:
 
 ### Minimal Eval Artifact Layout
 
-- `.claude/evals/<feature>.md` definition
-- `.claude/evals/<feature>.log` run history
+- `.mcode/evals/<feature>.md` definition
+- `.mcode/evals/<feature>.log` run history
 - `docs/releases/<version>/eval-summary.md` release snapshot

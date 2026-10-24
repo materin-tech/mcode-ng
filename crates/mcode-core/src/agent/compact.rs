@@ -1,6 +1,6 @@
 //! 上下文压缩 —— proactive 门控 + reactive continue 点。
 //!
-//! 对齐 CC 的 auto-compact：
+//! auto-compact：
 //! - **proactive**：回合开始前估算 tokens ≥ 窗口 80% → 压缩后再跑（runner 调 [`should_compact`]）；
 //! - **reactive**：API 返回 ContextOverflow → 压缩 → 重放（runner 的恢复路径）。
 //!
@@ -31,7 +31,7 @@ pub fn should_compact(deps: &AgentDeps, conv: &Conversation) -> bool {
     used >= auto_compact_threshold(&model)
 }
 
-/// 生成压缩指令（对齐 CC 的 /compact 摘要段结构）。
+/// 生成压缩指令（/compact 摘要段结构）。
 pub fn compact_instructions() -> String {
     "你是一个对话压缩器。请把下面的对话历史压缩成一份结构化摘要，供后续对话作为唯一上下文使用。\
      按以下段落组织（没有内容的段落省略）：\n\

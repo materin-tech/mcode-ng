@@ -125,7 +125,7 @@ fn scroll_down(state: &mut AppState, n: u16) {
     state.scroll_from_bottom = if next == 0 { None } else { Some(next) };
 }
 
-/// 整帧绘制。输入框永远钉在最底部（CC 式），状态/提示行贴其上方。
+/// 整帧绘制。输入框永远钉在最底部，状态/提示行贴其上方。
 pub fn draw(f: &mut Frame, state: &AppState) {
     let [transcript, status, composer] = Layout::vertical([
         Constraint::Min(3),
@@ -475,7 +475,7 @@ fn draw_statusline(f: &mut Frame, state: &AppState, area: Rect) {
         mcode_core::permission::Mode::Manual => Color::Yellow,
         mcode_core::permission::Mode::Plan => Color::Blue,
     };
-    // busy：CC 式运行态行「✻ 思考中… (15s · ↑1.2k ↓3.4k · esc 打断)」
+    // busy：运行态行「✻ 思考中… (15s · ↑1.2k ↓3.4k · esc 打断)」
     let mut spans = if state.busy {
         let elapsed = state
             .turn_started

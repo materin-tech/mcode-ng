@@ -11,7 +11,7 @@ PUA v3 之前的协议只覆盖 agent 生命周期的前 4 步（Define → Spaw
 - 会话 auto-compact 后 orphan 加倍 → OOM
 - 无独立的 SubagentStop 会计层 → 无法回答"当前还有多少 agent 在场上"
 
-**关于 "subagent 劫持主 loop" 的澄清**：这曾是最初的假设，但查 Claude Code 官方文档后证实**不成立**——`Stop` 事件仅主会话触发，subagent 完成走独立的 `SubagentStop` 事件。hooks.json 里如果只注册 `Stop`，subagent 的生命周期结束对主会话 hook 不可见。**真正的病因是 agent 生命周期缺少会计层**，不是 hook 层劫持。v3.1 起注册 SubagentStop hook 作为 teardown accounting，配合 `/pua:team-status` 提供"当前在场阵容"。
+**关于 "subagent 劫持主 loop" 的澄清**：这曾是最初的假设，但查 MCode 官方文档后证实**不成立**——`Stop` 事件仅主会话触发，subagent 完成走独立的 `SubagentStop` 事件。hooks.json 里如果只注册 `Stop`，subagent 的生命周期结束对主会话 hook 不可见。**真正的病因是 agent 生命周期缺少会计层**，不是 hook 层劫持。v3.1 起注册 SubagentStop hook 作为 teardown accounting，配合 `/pua:team-status` 提供"当前在场阵容"。
 
 本文定义缺失的 3 步，并给出可执行的命令/信号/检查清单。
 
@@ -98,7 +98,7 @@ TeamDelete({team_name: "<project-team>"})
 ```bash
 # 在 state 文件里记 agent_id 和 spawn_time
 # 巡检命令（也可用作 /pua:reap-orphans 后端）
-jq '.agents[] | select(.spawn_time < (now - 1800)) | .id' ~/.claude/pua/active-agents.json
+jq '.agents[] | select(.spawn_time < (now - 1800)) | .id' ~/.mcode/pua/active-agents.json
 ```
 
 ### R6. subagent 禁止再 spawn team（禁嵌套孤儿）
@@ -122,13 +122,13 @@ hook 层读 HOOK_INPUT.parent_session_id，若非空且尝试 TeamCreate → 拒
 git worktree list --porcelain | grep -A1 "<branch>" && git worktree remove ...
 
 # 2. 清 state file
-rm -f "$HOME/.claude/pua/agent-<id>.state"
+rm -f "$HOME/.mcode/pua/agent-<id>.state"
 
 # 3. 关 tmux pane（若是 TeamCreate 成员）
 tmux kill-pane -t <pane_id>
 
 # 4. 记录到 teardown log
-echo "{\"agent\":\"<id>\",\"reason\":\"<reason>\",\"ts\":\"$(date -u +%FT%TZ)\"}" >> "$HOME/.claude/pua/teardown.jsonl"
+echo "{\"agent\":\"<id>\",\"reason\":\"<reason>\",\"ts\":\"$(date -u +%FT%TZ)\"}" >> "$HOME/.mcode/pua/teardown.jsonl"
 ```
 
 ---
@@ -142,7 +142,7 @@ echo "{\"agent\":\"<id>\",\"reason\":\"<reason>\",\"ts\":\"$(date -u +%FT%TZ)\"}
 
 **三层防御**：
 
-1. **Stop hook 层**（自动）：每次主会话 Stop 时扫一次 `$HOME/.claude/pua/loop-*.md`，stale 的直接清理（已在 `pua-loop-hook.sh` 实现）
+1. **Stop hook 层**（自动）：每次主会话 Stop 时扫一次 `$HOME/.mcode/pua/loop-*.md`，stale 的直接清理（已在 `pua-loop-hook.sh` 实现）
 2. **SessionStart hook 层**（自动）：新会话启动时扫 state 目录，stale 的提示用户确认
 3. **用户显式**（手动）：`/pua:reap-orphans` 一键扫描 + 回收
 
@@ -164,7 +164,7 @@ PUA 的 14 个 slash 命令在本协议下的生命周期语义：
 **设计原则**：
 - **幂等**：重复执行同一开关不会产生副作用（re-rm 无害、re-kill 先检查）
 - **级联**：顶层开关触发底层清理，反向不允许（P7 不能 teardown P8）
-- **可观测**：所有 teardown 写 `$HOME/.claude/pua/teardown.jsonl`，便于复盘
+- **可观测**：所有 teardown 写 `$HOME/.mcode/pua/teardown.jsonl`，便于复盘
 
 ---
 
@@ -178,9 +178,9 @@ PUA 的 14 个 slash 命令在本协议下的生命周期语义：
 | `PreCompact` | dump 活跃 agent 清单到 HANDOFF | ✅ inline prompt hook |
 | `Stop`（主会话） | 走 loop 逻辑 + stale 兜底清理 | ✅ `pua-loop-hook.sh` + Gate 0 防御 |
 | `SubagentStop` | **agent 完成会计**：写 teardown.jsonl + 从 active-agents.json 移除 | ✅ `subagent-teardown.sh`（v3.1 新增） |
-| `PostToolUse:Task`（计划） | spawn 时记录 agent_id 到 active-agents.json | ⏳ 待实现（需 Claude Code 该事件支持） |
+| `PostToolUse:Task`（计划） | spawn 时记录 agent_id 到 active-agents.json | ⏳ 待实现（需 MCode 该事件支持） |
 
-**重要**：Claude Code 中 Stop 事件**仅**主会话触发，subagent 的 Stop 事件不会传到 Stop 钩子——所以监控 subagent 必须用独立的 SubagentStop 注册。pua-loop-hook.sh 的 Gate 0 保留作为"防御层"兜住未来调度变化，但不是必需防线。
+**重要**：MCode 中 Stop 事件**仅**主会话触发，subagent 的 Stop 事件不会传到 Stop 钩子——所以监控 subagent 必须用独立的 SubagentStop 注册。pua-loop-hook.sh 的 Gate 0 保留作为"防御层"兜住未来调度变化，但不是必需防线。
 
 ---
 
@@ -192,4 +192,4 @@ PUA 的 14 个 slash 命令在本协议下的生命周期语义：
 - ✅ `teardown` / `释放` / `回收` 在 p9-protocol 阶段四后出现 ≥ 3 次
 - ✅ `pua-loop-hook.sh` 有 Gate 0（subagent 识别）
 - ✅ `/pua:team-status`、`/pua:reap-orphans`、`/pua:teardown-all` 存在
-- ✅ `$HOME/.claude/pua/teardown.jsonl` 可写且有 schema
+- ✅ `$HOME/.mcode/pua/teardown.jsonl` 可写且有 schema

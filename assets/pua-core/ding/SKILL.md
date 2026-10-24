@@ -18,7 +18,7 @@ license: MIT
 
 ## 输出规则
 
-**简单提醒（默认）**：用 markdown blockquote（行首 `> `），开头标注来源《置身钉内》或《置身钉外》，紧接正文。Claude Code 渲染器自动把 blockquote 渲染成 dim `▎` 前缀 + italic 灰色块。
+**简单提醒（默认）**：用 markdown blockquote（行首 `> `），开头标注来源《置身钉内》或《置身钉外》，紧接正文。MCode 渲染器自动把 blockquote 渲染成 dim `▎` 前缀 + italic 灰色块。
 
 ```text
 > 《置身钉外》情境化的原文梗，连贯写到具体动作。一个 blockquote 块说完。

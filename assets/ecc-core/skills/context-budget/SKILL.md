@@ -1,6 +1,6 @@
 ---
 name: context-budget
-description: Routes live context checks to the native Codex or Claude Code meter without scanning files, and performs a bounded static component audit only when explicitly requested. Use for context-budget requests about remaining capacity or installed context overhead.
+description: Routes live context checks to the native Codex or MCode meter without scanning files, and performs a bounded static component audit only when explicitly requested. Use for context-budget requests about remaining capacity or installed context overhead.
 metadata:
   origin: ECC
 ---
@@ -29,10 +29,10 @@ Route by the active harness:
 | --- | --- | --- |
 | Codex CLI | `/status` | Shows current token usage and remaining context capacity. Use `/statusline` and enable **Context stats** plus **Token counters** for a persistent footer meter. |
 | Codex app | `/status` | Shows current thread context usage and rate limits. |
-| Claude Code | `/context` | Shows the live context breakdown. Use `/context all` for expanded items. |
+| MCode | `/context` | Shows the live context breakdown. Use `/context all` for expanded items. |
 | Other or unknown | None verified | State that ECC cannot read live provider state and ask which harness is active. |
 
-These commands are documented in the [Codex command reference](https://developers.openai.com/codex/cli/slash-commands) and [Claude Code command reference](https://code.claude.com/docs/en/commands).
+These commands are documented in the [Codex command reference](https://developers.openai.com/codex/cli/slash-commands) and [MCode command reference].
 
 A skill cannot invoke a TUI slash command on the user's behalf. Never replace
 the native command with an estimated scan and never infer an audit request from
@@ -130,4 +130,4 @@ values, missing or non-string types, and blank lines are unclassified. Neither c
 
 These counts do not establish active context, remaining room, token usage, billing, or what a
 reconnect loads. For current harness-reported context and usage, use the version-appropriate
-[`/context` and `/usage` commands (`/cost` is an alias)](https://code.claude.com/docs/en/commands).
+[`/context` and `/usage` commands (`/cost` is an alias)].

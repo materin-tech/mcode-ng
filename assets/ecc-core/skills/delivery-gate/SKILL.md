@@ -1,14 +1,14 @@
 ---
 name: delivery-gate
-description: Stop hook that blocks Claude from finishing until quality checks pass. Detects rationalization patterns (surface text heuristics), stale learning logs (filesystem mtime), and low disk space. Complements self-audit by mechanically enforcing learning capture habits. Use when Claude should be mechanically blocked from declaring work finished before quality checks and learning capture actually pass.
+description: Stop hook that blocks MCode from finishing until quality checks pass. Detects rationalization patterns (surface text heuristics), stale learning logs (filesystem mtime), and low disk space. Complements self-audit by mechanically enforcing learning capture habits. Use when MCode should be mechanically blocked from declaring work finished before quality checks and learning capture actually pass.
 metadata:
   version: 1.1.1
   origin: ECC
 ---
 
-# Delivery Gate — Mechanical Quality Gate for Claude Code
+# Delivery Gate — Mechanical Quality Gate for MCode
 
-A **Stop hook** that checks three things before Claude can finish a session, using only **deterministic checks** — file modification timestamps, disk usage, and regex patterns on the transcript text. No AI inference.
+A **Stop hook** that checks three things before MCode can finish a session, using only **deterministic checks** — file modification timestamps, disk usage, and regex patterns on the transcript text. No AI inference.
 
 This is distinct from reasoning gates (like `self-audit`): delivery-gate checks machine-verifiable facts; self-audit checks output quality across four reasoning dimensions. Together they form defense in depth:
 - **delivery-gate**: "Was the learning library touched today? Is disk space safe?"
@@ -29,7 +29,7 @@ Rationalization detection warns about patterns like "skip tests for now" and "pr
 
 ## Why
 
-Claude Code's built-in checks cover code quality (build → type → lint → test). But there's a different failure mode: the agent produces working code while the **session hygiene was neglected** — learning not captured, rationalized shortcuts, disk running out silently.
+MCode's built-in checks cover code quality (build → type → lint → test). But there's a different failure mode: the agent produces working code while the **session hygiene was neglected** — learning not captured, rationalized shortcuts, disk running out silently.
 
 Over many sessions of "ship and forget," the human hasn't grown. This hook enforces the habit: complex task → must touch learning libraries.
 
@@ -38,18 +38,18 @@ Over many sessions of "ship and forget," the human hasn't grown. This hook enfor
 From the ECC repository root:
 
 ```bash
-mkdir -p ~/.claude/scripts
-cp skills/delivery-gate/hooks/quality-gate.py ~/.claude/scripts/
+mkdir -p ~/.mcode/scripts
+cp skills/delivery-gate/hooks/quality-gate.py ~/.mcode/scripts/
 ```
 
-Add to `~/.claude/settings.json`:
+Add to `~/.mcode/settings.json`:
 ```json
 {
   "hooks": {
     "Stop": [{
       "hooks": [{
         "type": "command",
-        "command": "python3 ~/.claude/scripts/quality-gate.py",
+        "command": "python3 ~/.mcode/scripts/quality-gate.py",
         "timeout": 5000
       }]
     }]

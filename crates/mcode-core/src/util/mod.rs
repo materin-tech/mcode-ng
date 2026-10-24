@@ -37,7 +37,7 @@ pub fn desktop_config_path() -> Option<PathBuf> {
     mcode_dir().map(|d| d.join("desktop.json"))
 }
 
-/// cwd → 项目目录名（base64url 无 padding，对齐 TS `Buffer.from(cwd).toString('base64url')`）。
+/// cwd → 项目目录名（base64url 无 padding）。
 pub fn hash_cwd(cwd: &std::path::Path) -> String {
     URL_SAFE_NO_PAD.encode(cwd.to_string_lossy().as_bytes())
 }
@@ -67,7 +67,7 @@ pub fn now_ms() -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// token 用量台账（对齐 TS util/token-usage.ts 的按模型分组累计）
+// token 用量台账（按模型分组累计）
 // ---------------------------------------------------------------------------
 
 /// 单模型用量快照。

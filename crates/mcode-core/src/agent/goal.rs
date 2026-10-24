@@ -16,10 +16,10 @@ use crate::api::{StreamEvent, StreamRequest};
 use crate::message::{normalize_for_api, Message};
 use futures::StreamExt;
 
-/// goal 外层循环轮数上限（对齐 CLI cli.tsx runTurn）
+/// goal 外层循环轮数上限
 pub const MAX_GOAL_ROUNDS: usize = 12;
 
-/// /goal 持续指令（对齐 CLI goal.ts buildGoalPrompt）
+/// /goal 持续指令的续跑提示词。
 pub fn build_goal_prompt(goal: &str) -> String {
     [
         format!("[goal] {goal}"),
@@ -31,7 +31,7 @@ pub fn build_goal_prompt(goal: &str) -> String {
 }
 
 /// goal 完成裁判：独立单发流式调用（无工具、空历史）。
-/// fail-open：裁判出错/被打断 → 返回 false 继续干（对齐 CLI goal.ts checkGoalComplete）。
+/// fail-open：裁判出错/被打断 → 返回 false 继续干。
 pub async fn check_goal_complete(
     backend: &dyn crate::api::ModelBackend,
     model: &str,

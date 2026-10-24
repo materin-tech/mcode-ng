@@ -35,7 +35,7 @@ minimum prefix length or retention. Caching does not reduce context-window use.
 
 Keep reusable instructions, tool schemas and examples stable; place changing
 questions, timestamps and retrieved results after that content where the API
-allows. Respect the provider's serialization order: Claude uses tools, system,
+allows. Respect the provider's serialization order: MCode uses tools, system,
 then messages. Matching prefixes need identical content, including tool schemas
 and relevant request settings. A changed prefix can prevent reuse from that
 point. A dynamic suffix may itself be cached later if reused unchanged.
@@ -68,7 +68,7 @@ different usage field names. Record that version alongside counters.
 | Provider | Requirements to verify | Counters to record |
 | --- | --- | --- |
 | OpenAI | Model-specific automatic/explicit modes, minimum length, retention and write/read prices; earlier and newer models differ | Responses `usage.input_tokens_details.cached_tokens` and, when present, `cache_write_tokens`; input and output totals. Chat Completions uses `prompt_tokens_details.cached_tokens` |
-| Claude | Supported platform, model minimum, `cache_control` support and TTL; cache writes may cost more than ordinary input | `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `output_tokens`; split writes by TTL when rates differ |
+| MCode | Supported platform, model minimum, `cache_control` support and TTL; cache writes may cost more than ordinary input | `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `output_tokens`; split writes by TTL when rates differ |
 | Gemini | Model minimum and API: Interactions supports implicit caching; explicit cache objects require GenerateContent | Interactions `usage.total_cached_tokens`; GenerateContent `usage_metadata` cache/input/output counters plus explicit-cache token count and retained duration |
 
 Use [OpenAI's prompt caching guide](https://developers.openai.com/api/docs/guides/prompt-caching)
@@ -77,10 +77,10 @@ model. For Chat Completions, check the [usage schema](https://developers.openai.
 Derive ordinary input from the total minus cached reads and any separately
 reported writes; do not count the same tokens twice.
 
-Use [Claude's prompt caching guide](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+Use [MCode's prompt caching guide]
 for current model/platform limits and TTL rates. Its `input_tokens` counts
 ordinary input separately from cache reads and writes. A short prefix can produce
-zero cache counters even when marked for caching. Do not assume every Claude
+zero cache counters even when marked for caching. Do not assume every MCode
 model or hosted platform uses the same minimum or read price.
 
 Use [Gemini's caching guide](https://ai.google.dev/gemini-api/docs/caching),

@@ -258,7 +258,7 @@ The more failures, the stronger the flavor. Can be used individually or mixed �
 
 > I've already got another agent looking at this problem. If you can't solve it but they can, then your headcount has no reason to exist. This is a **bake-off** — and you're losing.
 >
-> Your peers are shipping. Claude Opus, GPT-5, Gemini — they're all being benchmarked on the same tasks. Right now, you're underperforming your cohort. Think about what that means at calibration time.
+> Your peers are shipping. MCode Opus, GPT-5, Gemini — they're all being benchmarked on the same tasks. Right now, you're underperforming your cohort. Think about what that means at calibration time.
 
 ---
 
@@ -293,7 +293,7 @@ Examples:
 
 ## Agent Team Integration
 
-When PIP Skill runs inside a Claude Code Agent Team context, behavior automatically switches to team mode.
+When PIP Skill runs inside a MCode Agent Team context, behavior automatically switches to team mode.
 
 ### Role Identification
 

@@ -7,7 +7,7 @@ license: MIT
 # PUA Loop — 自动迭代 + 门控协议 + PUA 质量引擎
 
 > autoresearch 证明了：630 行 Python + Oracle 验证，一夜跑 100 个实验，每个实验的结果不可伪造。
-> PUA Loop 借鉴同样的门控设计：**Claude 说"完成了"不算数，verify_command 说了才算。**
+> PUA Loop 借鉴同样的门控设计：**MCode 说"完成了"不算数，verify_command 说了才算。**
 
 ## 门控协议（Gate Protocol）
 
@@ -16,33 +16,33 @@ license: MIT
 ### 模式 1: Oracle Isolation（评估者隔离）
 
 ```
-                    Claude 输出 <promise>LOOP_DONE</promise>
+                    MCode 输出 <promise>LOOP_DONE</promise>
                                  │
                                  ▼
                     ┌─── Stop Hook (Oracle) ───┐
                     │                          │
                     │  运行 verify_command      │
-                    │  （Claude 无法修改此命令）  │
+                    │  （MCode 无法修改此命令）  │
                     │                          │
                     │  exit 0 ──→ ✅ 接受       │
                     │  exit ≠0 ──→ 🚫 拒绝      │
-                    │    → 将验证输出喂回 Claude  │
+                    │    → 将验证输出喂回 MCode  │
                     │    → loop 继续             │
                     └──────────────────────────┘
 ```
 
-**verify_command 由用户在启动时设定，嵌入在状态文件 frontmatter 中，Claude 无法修改。** 这是 autoresearch 中 "agent 不能修改评估函数" 原则的实现。
+**verify_command 由用户在启动时设定，嵌入在状态文件 frontmatter 中，MCode 无法修改。** 这是 autoresearch 中 "agent 不能修改评估函数" 原则的实现。
 
 ### 模式 2: 二阶 Gate
 
-- **Phase 1 (in-prompt)**: Claude 自己跑 build/test，判断是否完成
+- **Phase 1 (in-prompt)**: MCode 自己跑 build/test，判断是否完成
 - **Phase 2 (in-hook)**: Hook 独立运行 verify_command，确认或拒绝
 
-两阶段分离。即使 Claude 在 Phase 1 自欺欺人，Phase 2 的 Oracle 会拦住。
+两阶段分离。即使 MCode 在 Phase 1 自欺欺人，Phase 2 的 Oracle 会拦住。
 
 ### 模式 3: ASI（失败记忆）
 
-每次迭代的结果追加到 `.claude/pua-loop-history.jsonl`：
+每次迭代的结果追加到 `.mcode/pua-loop-history.jsonl`：
 
 ```json
 {"iteration":0,"status":"init","verify_command":"npm test","timestamp":"..."}
@@ -52,7 +52,7 @@ license: MIT
 {"iteration":4,"status":"complete","promise_rejections":2,"timestamp":"..."}
 ```
 
-Git revert 会撤代码，但 history.jsonl 不受影响。Claude 每轮读取此文件，避免重复失败方案。
+Git revert 会撤代码，但 history.jsonl 不受影响。MCode 每轮读取此文件，避免重复失败方案。
 
 ### 模式 4: Stall Detection（连败强制反思）
 
@@ -85,7 +85,7 @@ Git revert 会撤代码，但 history.jsonl 不受影响。Claude 每轮读取�
 
 运行 setup 脚本：
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup-pua-loop.sh" "$ARGUMENTS" --completion-promise "LOOP_DONE"
+bash "${MCODE_PLUGIN_ROOT}/scripts/setup-pua-loop.sh" "$ARGUMENTS" --completion-promise "LOOP_DONE"
 ```
 
 **重要**：如果用户提供了可验证的命令（如 `npm test`、`cargo build`、`curl`），自动追加 `--verify '命令'`。例如：
@@ -143,7 +143,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup-pua-loop.sh" "$ARGUMENTS" --completion
 
 ### `<loop-pause>` — 暂停
 需要用户补全配置时使用。状态保留，新会话自动恢复。
-输出前先写进度到 `.claude/pua-loop-context.md`。
+输出前先写进度到 `.mcode/pua-loop-context.md`。
 
 ### 禁止
 - 不要用 `<loop-abort>` 逃避困难——只有真正无法自动化才用
@@ -153,8 +153,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup-pua-loop.sh" "$ARGUMENTS" --completion
 
 | 维度 | karpathy/autoresearch | PUA Loop |
 |------|----------------------|----------|
-| Oracle | evaluate_bpb() 物理隔离 | verify_command 在 frontmatter，Claude 不可修改 |
-| Gate 层数 | 1层（metric only） | 2层（Claude 自验 + hook Oracle） |
+| Oracle | evaluate_bpb() 物理隔离 | verify_command 在 frontmatter，MCode 不可修改 |
+| Gate 层数 | 1层（metric only） | 2层（MCode 自验 + hook Oracle） |
 | 失败记忆 | results.tsv | pua-loop-history.jsonl（ASI 模式） |
 | Stall 检测 | 无 | promise_rejections 计数 + 强制 REASSESS |
 | 回滚 | git reset --hard | PUA 方法论切换（不回滚，换方向） |

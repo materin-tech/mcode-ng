@@ -482,7 +482,7 @@ impl ApiMessage {
 
 /// 把活跃主链折叠成可发送序列。
 ///
-/// 规则（对齐 Claude Code 的 normalizeMessagesForAPI 语义）：
+/// 规则：
 /// 1. 丢弃空消息（无内容块）；
 /// 2. 合并相邻同角色消息（块顺序保持）；
 /// 3. 每个 ToolUse 必须有紧随的 ToolResult——缺失时合成错误结果

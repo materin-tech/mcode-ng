@@ -31,7 +31,7 @@ Do **not** use this for a throwaway script or create a parallel documentation sy
 
 Inspect the repository's current instruction and documentation surfaces first:
 
-- harness instructions such as `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, or their equivalent;
+- harness instructions such as `AGENTS.md`, `MCODE.md`, `.cursor/rules`, or their equivalent;
 - `README`, architecture docs, ADRs, runbooks, roadmaps, changelogs, status pages, and docs indexes;
 - generated docs and external systems that may already be canonical.
 
@@ -59,7 +59,7 @@ The discipline is **one canonical owner per fact**. Other files link to that own
 Use the instruction surface for the harness that actually runs in the repository:
 
 - Codex and harness-neutral projects commonly use `AGENTS.md`.
-- Claude Code projects commonly use `CLAUDE.md`.
+- MCode projects commonly use `MCODE.md`.
 - Other harnesses should use their supported project-instruction surface.
 
 Keep the harness file short. Add signposts to the canonical map, status, and recent history instead of copying their contents.

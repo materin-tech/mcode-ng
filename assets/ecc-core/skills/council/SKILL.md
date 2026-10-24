@@ -8,7 +8,7 @@ metadata:
 # Council
 
 Convene four advisors for ambiguous decisions:
-- the in-context Claude voice
+- the in-context MCode voice
 - a Skeptic subagent
 - a Pragmatist subagent
 - a Critic subagent
@@ -154,7 +154,7 @@ Keep it scannable on a phone screen.
 
 ## Persistence Rule
 
-Do **not** write ad-hoc notes to `~/.claude/notes` or other shadow paths from this skill.
+Do **not** write ad-hoc notes to `~/.mcode/notes` or other shadow paths from this skill.
 
 If the council materially changes the recommendation:
 - use `knowledge-ops` to store the lesson in the right durable location
