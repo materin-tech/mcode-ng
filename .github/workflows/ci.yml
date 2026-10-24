@@ -9,7 +9,7 @@ jobs:
         components: clippy, rustfmt
     - uses: Swatinem/rust-cache@v2
     - run: cargo fmt --all -- --check
-    - run: cargo clippy --workspace --all-targets -- -D warnings
+    - run: cargo clippy --workspace --exclude mcode-ui --all-targets -- -D warnings
   test:
     strategy:
       fail-fast: false
@@ -25,13 +25,13 @@ jobs:
     - uses: Swatinem/rust-cache@v2
     - name: cargo test --workspace (unix)
       if: runner.os != 'Windows'
-      run: cargo test --workspace
+      run: cargo test --workspace --exclude mcode-ui
     - name: cargo test --workspace (windows, per-binary timeout)
       if: runner.os == 'Windows'
       shell: pwsh
       run: "$ErrorActionPreference = 'Stop'\n# 编译期单独可见（这一步可能占大头；job 能完成，缓存才落得下）\n\
-        cargo test --workspace --no-run\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE\
-        \ }\n# 抓测试二进制清单（增量，秒回）\n$bins = cargo test --workspace --no-run --message-format=json\
+        cargo test --workspace --exclude mcode-ui --no-run\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE\
+        \ }\n# 抓测试二进制清单（增量，秒回）\n$bins = cargo test --workspace --exclude mcode-ui --no-run --message-format=json\
         \ 2>$null |\n  Where-Object { $_.StartsWith('{') } | ForEach-Object { $_ | ConvertFrom-Json\
         \ } |\n  Where-Object { $_.executable -and $_.profile.test } |\n  Select-Object\
         \ -Unique -ExpandProperty executable\nWrite-Host \"test binaries: $($bins.Count)\"\
@@ -47,6 +47,22 @@ jobs:
         \ { Write-Host $_ }\n  Get-Content $se.FullName | ForEach-Object { Write-Host\
         \ $_ }\n  if ($p.ExitCode -ne 0) { exit $p.ExitCode }\n}\nWrite-Host 'ALL\
         \ BINARIES DONE'\n"
+  desktop:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - name: clippy (mcode-ui)
+      run: cargo clippy -p mcode-ui --all-targets -- -D warnings
+    - name: test (mcode-ui)
+      run: cargo test -p mcode-ui
+    - name: build release (mcode-ui)
+      run: cargo build --release -p mcode-ui
+    - uses: actions/upload-artifact@v4
+      with:
+        name: MCode_Desktop-aarch64-apple-darwin
+        path: target/release/MCode_Desktop
   build-macos-arm64:
     runs-on: macos-latest
     steps:
