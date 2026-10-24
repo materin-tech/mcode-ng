@@ -22,7 +22,7 @@ use crate::tools::{Tool, ToolContext, ToolDefinition, ToolRegistry, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -214,6 +214,19 @@ fn truncate_chars(s: &str, max: usize) -> String {
 #[derive(Debug, Clone, Default)]
 pub struct AgentRegistry {
     agents: BTreeMap<String, AgentDefinition>,
+}
+
+/// 内置资产子代理层：物化到 `~/.mcode/assets/ecc-core/agents` 的子代理定义。
+pub fn bundled_agent_dirs() -> Vec<PathBuf> {
+    bundled_agent_dirs_at(crate::util::mcode_dir().as_deref())
+}
+
+/// [`bundled_agent_dirs`] 的可注入形态（测试与自定义 HOME 用）。
+pub fn bundled_agent_dirs_at(home: Option<&Path>) -> Vec<PathBuf> {
+    let Some(h) = home else {
+        return Vec::new();
+    };
+    vec![h.join("assets").join("ecc-core").join("agents")]
 }
 
 impl AgentRegistry {
@@ -715,6 +728,15 @@ impl Tool for TaskStopTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_agent_dirs_point_at_materialized_tier() {
+        let dirs = bundled_agent_dirs_at(Some(Path::new("/home/u")));
+        assert_eq!(dirs.len(), 1);
+        assert!(dirs[0].ends_with("assets/ecc-core/agents"));
+        assert!(bundled_agent_dirs_at(None).is_empty());
+    }
+
     use crate::agent::runner::run_agent_turn;
     use crate::api::{ApiError, StreamEvent};
     use crate::message::StopReason;

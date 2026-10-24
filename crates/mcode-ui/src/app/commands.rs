@@ -291,9 +291,58 @@ pub fn filter_commands(query: &str) -> Vec<&'static CommandDef> {
         .collect()
 }
 
+/// `/` 面板的技能候选：已加载技能按 name 过滤，展示形态与 CLI 一致
+///（`技能：<描述前 60 字>`）。
+pub fn slash_skill_candidates(
+    skills: &[mcode_core::skills::SkillDefinition],
+    query: &str,
+) -> Vec<crate::app::completion::Candidate> {
+    let q = query.to_lowercase();
+    skills
+        .iter()
+        .filter(|s| s.name.to_lowercase().contains(&q))
+        .map(|s| {
+            let d = s.description.trim();
+            let head: String = d.chars().take(60).collect();
+            crate::app::completion::Candidate {
+                name: s.name.clone(),
+                desc: format!("技能：{head}"),
+                is_dir: false,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mcode_core::skills::SkillDefinition;
+    use std::path::PathBuf;
+
+    fn skill(name: &str, desc: &str) -> SkillDefinition {
+        SkillDefinition {
+            name: name.into(),
+            description: desc.into(),
+            path: PathBuf::new(),
+            source_dir: PathBuf::new(),
+        }
+    }
+
+    #[test]
+    fn slash_skill_candidates_filter_and_format() {
+        let skills = vec![
+            skill("pua-loop", "以完成信号收尾的自主循环"),
+            skill("gateguard", "路径门卫"),
+        ];
+        let hits = slash_skill_candidates(&skills, "pua");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].name, "pua-loop");
+        assert!(hits[0].desc.starts_with("技能："));
+        assert!(hits[0].desc.contains("自主循环"));
+        // 大小写不敏感 + 无命中为空
+        assert_eq!(slash_skill_candidates(&skills, "PUA").len(), 1);
+        assert!(slash_skill_candidates(&skills, "nope").is_empty());
+    }
 
     #[test]
     fn full_command_set_loaded() {

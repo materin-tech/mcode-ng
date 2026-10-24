@@ -165,10 +165,16 @@ fn real_tool_context(cwd: &Path) -> (ToolContext, watch::Sender<bool>) {
     )
 }
 
-/// 技能目录三层：`~/.mcode/skills` → `.mcode/skills`（项目覆盖用户）→ 插件技能。
+/// 技能目录四层：bundled（ecc-core → pua-core）→ 用户 → 项目 → 插件
+///（后加载覆盖同名，与桌面端同源）。
 fn load_skill_registry(cwd: &Path) -> SkillRegistry {
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    if let Some(d) = mcode_core::util::mcode_dir() {
+    load_skill_registry_at(cwd, mcode_core::util::mcode_dir().as_deref())
+}
+
+/// [`load_skill_registry`] 的可注入形态（测试与自定义 HOME 用）。
+fn load_skill_registry_at(cwd: &Path, home: Option<&Path>) -> SkillRegistry {
+    let mut dirs = mcode_core::skills::bundled_dirs_at(home);
+    if let Some(d) = home {
         dirs.push(d.join("skills"));
     }
     dirs.push(cwd.join(".mcode").join("skills"));
@@ -180,10 +186,15 @@ fn load_skill_registry(cwd: &Path) -> SkillRegistry {
     SkillRegistry::load_dirs(&refs)
 }
 
-/// 子代理目录三层：`~/.mcode/agents` → `.mcode/agents` → 插件 agents。
+/// 子代理目录三层：bundled（ecc-core agents）→ 用户 → 项目 → 插件。
 fn load_agent_registry(cwd: &Path) -> AgentRegistry {
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    if let Some(d) = mcode_core::util::mcode_dir() {
+    load_agent_registry_at(cwd, mcode_core::util::mcode_dir().as_deref())
+}
+
+/// [`load_agent_registry`] 的可注入形态（测试与自定义 HOME 用）。
+fn load_agent_registry_at(cwd: &Path, home: Option<&Path>) -> AgentRegistry {
+    let mut dirs = mcode_core::subagents::bundled_agent_dirs_at(home);
+    if let Some(d) = home {
         dirs.push(d.join("agents"));
     }
     dirs.push(cwd.join(".mcode").join("agents"));
@@ -203,4 +214,98 @@ fn plugin_root_dirs(cwd: &Path) -> Vec<PathBuf> {
     }
     dirs.push(cwd.join(".mcode").join("plugins"));
     dirs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn uniq(tag: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let d = std::env::temp_dir().join(format!(
+            "mcode_cli_layers_{}_{}_{}",
+            tag,
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn write(path: &std::path::Path, content: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+
+    fn skill_md(desc: &str) -> String {
+        format!("---\ndescription: {desc}\n---\n\n按说明书行动。\n")
+    }
+
+    #[test]
+    fn skill_registry_includes_bundled_tier_and_user_overrides() {
+        let home = uniq("home");
+        let cwd = uniq("cwd");
+        // bundled 层：桌面端物化布局 ~/.mcode/assets/ecc-core/skills/<name>/SKILL.md
+        write(
+            &home.join("assets/ecc-core/skills/bundled-skill/SKILL.md"),
+            &skill_md("来自内置资产"),
+        );
+        write(
+            &home.join("assets/pua-core/pua-skill/SKILL.md"),
+            &skill_md("来自 pua 资产"),
+        );
+        // 用户层 + 项目层
+        write(
+            &home.join("skills/user-skill/SKILL.md"),
+            &skill_md("来自用户层"),
+        );
+        write(
+            &cwd.join(".mcode/skills/proj-skill/SKILL.md"),
+            &skill_md("来自项目层"),
+        );
+        // 同名覆盖：bundled 与 user 各有一份 dup → 用户层胜
+        write(
+            &home.join("assets/ecc-core/skills/dup/SKILL.md"),
+            &skill_md("bundled 版"),
+        );
+        write(&home.join("skills/dup/SKILL.md"), &skill_md("用户版"));
+
+        let reg = load_skill_registry_at(&cwd, Some(&home));
+        let names = reg.names();
+        for expected in ["bundled-skill", "pua-skill", "user-skill", "proj-skill"] {
+            assert!(
+                names.iter().any(|n| n == expected),
+                "缺 {expected}: {names:?}"
+            );
+        }
+        let dup = reg
+            .all()
+            .into_iter()
+            .find(|s| s.name == "dup")
+            .expect("dup 应存在且去重为一份");
+        assert_eq!(dup.description, "用户版", "同名技能用户层应覆盖 bundled 层");
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[test]
+    fn agent_registry_includes_bundled_tier() {
+        let home = uniq("agent_home");
+        let cwd = uniq("agent_cwd");
+        write(
+            &home.join("assets/ecc-core/agents/bundled-agent.md"),
+            "---\nname: bundled-agent\ndescription: 内置子代理\n---\n\n负责调研。\n",
+        );
+        write(
+            &cwd.join(".mcode/agents/proj-agent.md"),
+            "---\nname: proj-agent\ndescription: 项目子代理\n---\n\n负责改动。\n",
+        );
+        let reg = load_agent_registry_at(&cwd, Some(&home));
+        let names = reg.names();
+        assert!(names.iter().any(|n| n == "bundled-agent"), "{names:?}");
+        assert!(names.iter().any(|n| n == "proj-agent"), "{names:?}");
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
 }

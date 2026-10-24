@@ -47,6 +47,23 @@ pub struct SkillRegistry {
     skills: BTreeMap<String, SkillDefinition>,
 }
 
+/// 内置资产技能层：桌面端启动物化到 `~/.mcode/assets` 的 ecc-core/pua-core，
+/// CLI 与桌面端同源加载（目录不存在时 `load_dirs` 自然跳过）。
+pub fn bundled_dirs() -> Vec<PathBuf> {
+    bundled_dirs_at(crate::util::mcode_dir().as_deref())
+}
+
+/// [`bundled_dirs`] 的可注入形态（测试与自定义 HOME 用）。
+pub fn bundled_dirs_at(home: Option<&Path>) -> Vec<PathBuf> {
+    let Some(h) = home else {
+        return Vec::new();
+    };
+    vec![
+        h.join("assets").join("ecc-core").join("skills"),
+        h.join("assets").join("pua-core"),
+    ]
+}
+
 impl SkillRegistry {
     pub fn new() -> Self {
         Self::default()
@@ -84,6 +101,8 @@ impl SkillRegistry {
             .join("\n")
     }
 
+    /// 扫描目录列表加载技能（`<dir>/<name>/SKILL.md`；后者覆盖前者同名）。
+    /// 目录不存在 → 跳过；缺 SKILL.md 的目录跳过；坏文件宽容（不拖垮整体）。
     /// 扫描目录列表加载技能（`<dir>/<name>/SKILL.md`；后者覆盖前者同名）。
     /// 目录不存在 → 跳过；缺 SKILL.md 的目录跳过；坏文件宽容（不拖垮整体）。
     pub fn load_dirs(dirs: &[&Path]) -> Self {
@@ -212,6 +231,16 @@ impl Tool for SkillTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_dirs_point_at_materialized_tiers() {
+        let dirs = bundled_dirs_at(Some(Path::new("/home/u")));
+        assert_eq!(dirs.len(), 2);
+        assert!(dirs[0].ends_with("assets/ecc-core/skills"));
+        assert!(dirs[1].ends_with("assets/pua-core"));
+        // 无 HOME（极端环境）→ 空，load_dirs 侧自然退化为三层
+        assert!(bundled_dirs_at(None).is_empty());
+    }
 
     /// 唯一临时目录。
     fn tmp_dir(tag: &str) -> PathBuf {

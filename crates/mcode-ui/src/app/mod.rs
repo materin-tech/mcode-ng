@@ -35,7 +35,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::app::commands::filter_commands;
+use crate::app::commands::{filter_commands, slash_skill_candidates};
 use crate::app::completion::{Candidate, CompletionState, InputHistory, Trigger};
 use crate::app::goal::{MAX_GOAL_ROUNDS, build_goal_prompt, check_goal_complete};
 use crate::app::msg::{ChatMsg, DiffLine, FoldState, PendingPermission, default_fold_for, trunc};
@@ -937,6 +937,7 @@ impl App {
                         desc: c.desc.into(),
                         is_dir: false,
                     })
+                    .chain(slash_skill_candidates(&self.ext_skills, &q))
                     .collect(),
                 // 层级下钻（对齐 CLI）：按 query 末个 '/' 拆目录前缀，只列该目录
                 // 的立即子项并前缀过滤——不再对整棵树做扁平 substring 全表扫
