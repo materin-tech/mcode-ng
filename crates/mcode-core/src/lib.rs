@@ -17,6 +17,7 @@
 
 pub mod agent;
 pub mod api;
+pub mod commands;
 pub mod config;
 pub mod hooks;
 pub mod mcp;
