@@ -1701,8 +1701,16 @@ mod tests {
     async fn pre_tool_use_deny_blocks_tool_execution() {
         let (reg, counter) = echo_registry();
         let mut h = TestHarness::with_registry("m", vec![], reg);
+        // Windows cmd 在非 UTF-8 代码页（runner 是 CP437）下 stdout 会把非 ASCII
+        // 打成 '?'——断言载荷换 ASCII；阻断语义与载荷语言无关，中文往返
+        // 完整性在 unix 侧照样覆盖。
+        let reason = if cfg!(windows) {
+            "deny echo"
+        } else {
+            "禁用 echo"
+        };
         h.deps.hooks = Some(Arc::new(HookRunner::new(
-            vec![hook_cfg(HookEvent::PreToolUse, &deny_cmd("禁用 echo"))],
+            vec![hook_cfg(HookEvent::PreToolUse, &deny_cmd(reason))],
             "sess",
         )));
         h.push(tool_turn("t1", "echo", json!({"text": "hi"})));
@@ -1720,7 +1728,7 @@ mod tests {
         let msgs = conv.active_messages();
         let (_, is_error, content) = first_tool_result(&msgs);
         assert!(is_error, "hook 阻断以错误结果回喂");
-        assert!(content.contains("禁用 echo"), "reason 回喂模型: {content}");
+        assert!(content.contains(reason), "reason 回喂模型: {content}");
     }
 
     #[tokio::test]
@@ -1782,8 +1790,13 @@ mod tests {
     async fn post_tool_use_block_converts_result_to_error() {
         let (reg, counter) = echo_registry();
         let mut h = TestHarness::with_registry("m", vec![], reg);
+        let reason = if cfg!(windows) {
+            "blocked"
+        } else {
+            "结果不过审"
+        };
         h.deps.hooks = Some(Arc::new(HookRunner::new(
-            vec![hook_cfg(HookEvent::PostToolUse, &deny_cmd("结果不过审"))],
+            vec![hook_cfg(HookEvent::PostToolUse, &deny_cmd(reason))],
             "sess",
         )));
         h.push(tool_turn("t1", "echo", json!({"text": "hi"})));
@@ -1797,7 +1810,7 @@ mod tests {
         let msgs = conv.active_messages();
         let (_, is_error, content) = first_tool_result(&msgs);
         assert!(is_error);
-        assert!(content.contains("结果不过审"), "{content}");
+        assert!(content.contains(reason), "{content}");
     }
 
     #[tokio::test]
