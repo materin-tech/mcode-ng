@@ -20,6 +20,6 @@ futures = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 unicode-width = { workspace = true }
-ratatui = { workspace = true }
+pulldown-cmark = { workspace = true }
 crossterm = { workspace = true }
 dirs = { workspace = true }

@@ -29,4 +29,5 @@ pub mod skills;
 pub mod subagents;
 pub mod token;
 pub mod tools;
+pub mod transcript;
 pub mod util;

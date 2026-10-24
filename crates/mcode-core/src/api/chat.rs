@@ -331,9 +331,10 @@ impl ChatSse {
             .and_then(|c| c.as_array())
             .and_then(|c| c.first())?;
 
+        // 结束原因只记录、不提前返回：vLLM 网关会把最后一段 content 和
+        // finish_reason 放进同一个 chunk，提前 return 会把正文吞掉
         if let Some(reason) = choice.get("finish_reason").filter(|r| !r.is_null()) {
             self.finish_reason = Some(map_finish_reason(reason.as_str()));
-            return None; // 槽位收口与 Done 统一交给 finalize
         }
 
         let delta = choice.get("delta")?;
@@ -345,7 +346,6 @@ impl ChatSse {
                     self.outbox.push(StreamEvent::ThinkingDelta {
                         text: text.to_string(),
                     });
-                    return None;
                 }
             }
         }
@@ -354,7 +354,6 @@ impl ChatSse {
         if let Some(text) = delta.get("content").and_then(|x| x.as_str()) {
             if !text.is_empty() {
                 self.outbox.push(StreamEvent::TextDelta(text.to_string()));
-                return None;
             }
         }
 
@@ -445,6 +444,29 @@ mod tests {
                 .collect::<Vec<_>>()
                 .await
         })
+    }
+
+    #[test]
+    fn finish_chunk_can_carry_final_content() {
+        // vLLM 网关实测：content 与 finish_reason 同块到达，正文不能被吞
+        let events = run(vec![
+            r#"{"choices":[{"delta":{"role":"assistant","content":""}}]}"#,
+            r#"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#,
+            r#"{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#,
+            "[DONE]",
+        ]);
+        let texts: Vec<String> = events
+            .iter()
+            .filter_map(|e| match e.as_ref().ok() {
+                Some(StreamEvent::TextDelta(t)) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, vec!["ok"], "{events:?}");
+        assert!(matches!(
+            events.last().map(|e| e.as_ref()),
+            Some(Ok(StreamEvent::Done { .. }))
+        ));
     }
 
     #[test]
