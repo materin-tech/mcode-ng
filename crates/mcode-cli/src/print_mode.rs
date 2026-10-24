@@ -22,11 +22,13 @@ pub fn system_prompt(cwd: &std::path::Path) -> Vec<String> {
     )]
 }
 
-/// 组回合参数：系统提示 + 全量工具清单。`model_override` 供交互层 /model。
+/// 组回合参数：系统提示 + 全量工具清单。`model_override` 供交互层 /model，
+/// `effort` 供 /effort（None = 保持默认：API 侧不加 thinking 配置）。
 pub fn turn_opts(
     rt: &SessionRuntime,
     cwd: &std::path::Path,
     model_override: Option<&str>,
+    effort: Option<mcode_core::api::ThinkingEffort>,
 ) -> RunOpts {
     let mut opts = RunOpts::new(system_prompt(cwd))
         .with_tools(
@@ -42,6 +44,7 @@ pub fn turn_opts(
     if let Some(m) = model_override {
         opts = opts.with_model(m);
     }
+    opts = opts.with_thinking(effort.map(|e| mcode_core::api::ThinkingConfig { effort: e }));
     opts
 }
 
@@ -57,7 +60,7 @@ pub async fn run_turn(
     // 用户输入消息由调用方落盘（checkpoint = 回合入口的 user 消息）。
     rt.deps
         .record_message(conv.messages.last().expect("刚 push 必有"));
-    run_prepared(rt, conv, None, emit).await
+    run_prepared(rt, conv, None, None, emit).await
 }
 
 /// 回合执行（用户消息已由调用方 push + 落盘）。TUI 自己 push 以拿到
@@ -66,12 +69,13 @@ pub async fn run_prepared(
     rt: &SessionRuntime,
     conv: &mut Conversation,
     model_override: Option<&str>,
+    effort: Option<mcode_core::api::ThinkingEffort>,
     emit: EventSink,
 ) -> mcode_core::agent::runner::RunOutcome {
     run_agent_turn(
         &rt.deps,
         conv,
-        &turn_opts(rt, &rt.deps.tool_ctx.cwd, model_override),
+        &turn_opts(rt, &rt.deps.tool_ctx.cwd, model_override, effort),
         &emit,
     )
     .await

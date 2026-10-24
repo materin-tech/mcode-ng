@@ -43,12 +43,31 @@ pub enum LineKind {
 /// 提交输入后的分派动作。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    /// 发起回合（prompt 已按 skill 展开完毕）。
+    /// 发起回合（display 与 payload 同文）。
     Send(String),
+    /// 发起回合，但 transcript 展示 `display`（如 `/init`），实际发送 `payload`。
+    Prompt { display: String, payload: String },
     /// `!cmd`：绕过模型直接跑 shell。
     Bash(String),
     /// slash 命令已本地处理。
     Local(&'static str),
+    /// 需要运行时数据/IO 的命令（run 循环落地）。
+    Runtime(RuntimeCmd),
+}
+
+/// 需要会话/存储/后端配合的命令（state 保持纯状态，IO 在 run 层）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeCmd {
+    /// /compact [instructions]
+    Compact(Option<String>),
+    /// /export [file]
+    Export(Option<String>),
+    /// /rename <title>
+    Rename(String),
+    /// /resume [id]；None = 列出会话
+    Resume(Option<String>),
+    /// /provider [name]；None = 展示清单
+    Provider(Option<String>),
 }
 
 /// 一个回合检查点（rewind 目标）：回合入口的 user 消息 + 其 parent。
@@ -91,8 +110,18 @@ const MAX_COMPLETION_CANDIDATES: usize = 20;
 /// 弹窗一屏最多可视候选行（超出滚动跟随选中项）。
 pub(crate) const MAX_COMPLETION_VISIBLE: usize = 8;
 
-/// 内置斜杠命令（技能名由 run 层追加成完整命令表）。
-pub const BUILTIN_SLASH_COMMANDS: &[&str] = &["help", "clear", "context", "mode", "model", "quit"];
+/// 内置斜杠命令补全候选（来自 core 共享目录，带用法+作用提示；
+/// 技能名由 run 层追加成完整命令表）。
+pub fn builtin_slash_candidates() -> Vec<CompletionCandidate> {
+    mcode_core::commands::COMMANDS
+        .iter()
+        .map(|c| CompletionCandidate {
+            insert: c.name.to_string(),
+            display: format!("{} — {}", c.usage, c.desc),
+            is_dir: false,
+        })
+        .collect()
+}
 
 /// 累计 token（Usage 事件）。
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -129,8 +158,8 @@ pub struct AppState {
     pub mode: mcode_core::permission::Mode,
     /// 回合进行中。
     pub busy: bool,
-    /// busy 期间排队输入（回合结束自动发送）。
-    pub queue: VecDeque<String>,
+    /// busy 期间排队输入（回合结束自动发送）；(展示名, 发送载荷)。
+    pub queue: VecDeque<(String, String)>,
     pub lines: Vec<Line>,
     /// 已发送输入（↑ 回溯）。
     pub history: Vec<String>,
@@ -156,8 +185,22 @@ pub struct AppState {
     pub completion: Option<Completion>,
     /// 工作区文件清单（@ 补全数据源；启动时由 run 循环填充）。
     pub workspace_root: PathBuf,
-    /// 斜杠命令表（内置 + 技能名；启动时由 run 循环填充）。
-    pub slash_commands: Vec<String>,
+    /// 斜杠命令候选（内置 + 技能名；启动时由 run 循环填充）。
+    pub slash_commands: Vec<CompletionCandidate>,
+    /// goal 循环状态（Some = 循环进行中；/goal <objective> 开启，再次 /goal 取消）。
+    pub goal: Option<GoalState>,
+    /// /effort 选择（None = API 侧默认；下一回合生效）。
+    pub effort: Option<mcode_core::api::ThinkingEffort>,
+    /// /resume <id> 请求（run 循环退出后重建运行时载入该会话）。
+    pub resume_request: Option<String>,
+}
+
+/// goal 外层循环状态。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoalState {
+    pub objective: String,
+    /// 已完成回合数（含判官否决的续跑），达 [`MAX_GOAL_ROUNDS`] 上限即停。
+    pub round: usize,
 }
 
 impl AppState {
@@ -214,6 +257,7 @@ impl AppState {
                 name,
                 success,
                 output,
+                display: _,
                 scope,
             } => {
                 let preview: String = output.trim().chars().take(300).collect();
@@ -336,16 +380,29 @@ impl AppState {
         Some(Action::Send(text))
     }
 
-    /// slash 命令分派。内置命令本地处理；已知技能 → 展开为 Send。
+    /// slash 命令分派。内置命令按 core 共享目录处理（提示带用法+作用）；
+    /// 已知技能 → 原文 Send（expand 在 run 层装载手册）。
     fn dispatch_slash(&mut self, name: &str, args: &str) -> Action {
+        let name = match mcode_core::commands::lookup(name) {
+            Some(spec) => spec.name,
+            None => name,
+        };
         match name {
             "help" => {
-                self.push_line(
-                    LineKind::System,
-                    "命令：/help /clear /context /model /mode /quit  ·  shift+tab 切权限模式  ·  \
-                     @文件 补全  ·  esc 打断 / 双 esc 回退  ·  ctrl+o 详情  ·  !cmd 跑 shell  ·  \
-                     ctrl+c 退出",
-                );
+                if args.is_empty() {
+                    for l in render_help() {
+                        self.push_line(LineKind::System, l);
+                    }
+                } else {
+                    // /help <command>：单条指令的用法+作用
+                    match mcode_core::commands::lookup(args) {
+                        Some(c) => {
+                            self.push_line(LineKind::System, format!("{} — {}", c.usage, c.desc))
+                        }
+                        None => self
+                            .push_line(LineKind::System, format!("未知命令 /{args}；/help 看全部")),
+                    }
+                }
                 Action::Local("help")
             }
             "clear" => {
@@ -353,10 +410,82 @@ impl AppState {
                 self.checkpoints.clear();
                 Action::Local("clear")
             }
+            "compact" => {
+                let a = args.trim();
+                Action::Runtime(RuntimeCmd::Compact((!a.is_empty()).then(|| a.to_string())))
+            }
             "context" => Action::Local("context"),
+            "cost" => {
+                self.push_line(
+                    LineKind::System,
+                    format!(
+                        "累计 ↑{} ↓{} tokens（成本按 provider 计价，以控制台账单为准）",
+                        compact(self.tokens.input),
+                        compact(self.tokens.output)
+                    ),
+                );
+                Action::Local("cost")
+            }
+            "token" => Action::Local("token"),
+            "diff" => Action::Local("diff"),
+            "files" => Action::Local("files"),
+            "doctor" => Action::Local("doctor"),
+            "status" => Action::Local("status"),
+            "permissions" => Action::Local("permissions"),
+            "mcp" => Action::Local("mcp"),
+            "hooks" => Action::Local("hooks"),
+            "agents" => Action::Local("agents"),
+            "skills" => Action::Local("skills"),
+            "provider" => {
+                let a = args.trim().to_string();
+                Action::Runtime(RuntimeCmd::Provider((!a.is_empty()).then_some(a)))
+            }
+            "memory" => Action::Local("memory"),
+            "init" => Action::Prompt {
+                display: "/init".into(),
+                payload: init_prompt(),
+            },
+            "effort" => {
+                match args.trim().to_lowercase().as_str() {
+                    "" => {}
+                    "low" => self.effort = Some(mcode_core::api::ThinkingEffort::Low),
+                    "medium" => self.effort = Some(mcode_core::api::ThinkingEffort::Medium),
+                    "high" => self.effort = Some(mcode_core::api::ThinkingEffort::High),
+                    other => {
+                        self.push_line(
+                            LineKind::System,
+                            format!("未知级别 {other}；用法：/effort [low|medium|high]"),
+                        );
+                        return Action::Local("effort");
+                    }
+                }
+                let cur = self
+                    .effort
+                    .map(label_of_effort)
+                    .unwrap_or("默认（由 API 决定）");
+                self.push_line(LineKind::System, format!("推理努力级别：{cur}"));
+                Action::Local("effort")
+            }
             "mode" => {
-                let m = self.cycle_mode();
-                let _ = m;
+                let a = args.trim().to_lowercase();
+                if a.is_empty() {
+                    self.cycle_mode();
+                } else {
+                    match mcode_core::permission::Mode::from_label(&a) {
+                        Some(m) => {
+                            self.mode = m;
+                            self.push_line(LineKind::System, format!("权限模式 → {}", m.label()));
+                        }
+                        None => {
+                            self.push_line(
+                                LineKind::System,
+                                format!(
+                                    "未知模式 {a}；可用：manual（逐步确认）/ auto / plan / passon"
+                                ),
+                            );
+                        }
+                    }
+                }
                 Action::Local("mode")
             }
             "model" => {
@@ -379,9 +508,69 @@ impl AppState {
                 }
                 Action::Local("model")
             }
-            "quit" | "exit" => {
+            "quit" => {
                 self.should_quit = true;
                 Action::Local("quit")
+            }
+            "rename" => {
+                let t = args.trim().to_string();
+                if t.is_empty() {
+                    self.push_line(LineKind::System, "用法：/rename <title>");
+                } else {
+                    return Action::Runtime(RuntimeCmd::Rename(t));
+                }
+                Action::Local("rename")
+            }
+            "resume" => {
+                let a = args.trim().to_string();
+                Action::Runtime(RuntimeCmd::Resume((!a.is_empty()).then_some(a)))
+            }
+            "rewind" => {
+                if !self.open_rewind() {
+                    if self.busy {
+                        self.push_line(LineKind::System, "回合进行中，先 esc 打断再回退");
+                    } else {
+                        self.push_line(LineKind::System, "暂无可回退的检查点");
+                    }
+                }
+                Action::Local("rewind")
+            }
+            "save" => Action::Local("save"),
+            "export" => {
+                let a = args.trim().to_string();
+                Action::Runtime(RuntimeCmd::Export((!a.is_empty()).then_some(a)))
+            }
+            "copy" => Action::Local("copy"),
+            "goal" => {
+                let obj = args.trim().to_string();
+                if obj.is_empty() {
+                    if self.goal.take().is_some() {
+                        self.push_line(LineKind::System, "🎯 goal 循环已取消");
+                    } else {
+                        self.push_line(
+                            LineKind::System,
+                            "用法：/goal <objective>；进行中再次输入 /goal 取消",
+                        );
+                    }
+                    return Action::Local("goal");
+                }
+                if self.busy {
+                    self.push_line(LineKind::System, "回合进行中，先 esc 打断再开 goal");
+                    return Action::Local("goal");
+                }
+                let prompt = mcode_core::agent::goal::build_goal_prompt(&obj);
+                self.goal = Some(GoalState {
+                    objective: obj.clone(),
+                    round: 0,
+                });
+                self.push_line(
+                    LineKind::System,
+                    format!("🎯 goal 开启（上限 12 轮）：{obj}；再次输入 /goal 取消"),
+                );
+                Action::Prompt {
+                    display: format!("/goal {obj}"),
+                    payload: prompt,
+                }
             }
             other => {
                 // 技能分派交由 run 循环查 SkillRegistry（state 不持引用）。
@@ -506,7 +695,7 @@ impl AppState {
         self.turn_started = None;
     }
 
-    pub fn dequeue_next(&mut self) -> Option<String> {
+    pub fn dequeue_next(&mut self) -> Option<(String, String)> {
         self.queue.pop_front()
     }
 
@@ -556,8 +745,8 @@ impl AppState {
         self.workspace_root = root;
     }
 
-    /// 设置斜杠命令表（内置 + 技能名，启动时调用一次）。
-    pub fn set_slash_commands(&mut self, cmds: Vec<String>) {
+    /// 设置斜杠命令候选（内置目录 + 技能名，启动时调用一次）。
+    pub fn set_slash_commands(&mut self, cmds: Vec<CompletionCandidate>) {
         self.slash_commands = cmds;
     }
 
@@ -622,12 +811,8 @@ impl AppState {
             }
             self.slash_commands
                 .iter()
-                .filter(|n| n.starts_with(&fragment))
-                .map(|n| CompletionCandidate {
-                    insert: n.clone(),
-                    display: n.clone(),
-                    is_dir: false,
-                })
+                .filter(|c| c.insert.starts_with(&fragment))
+                .cloned()
                 .collect()
         } else {
             // '@'：dir_part 原样用于路径解析，base 才大小写不敏感过滤
@@ -707,6 +892,41 @@ impl AppState {
     pub fn close_completion(&mut self) {
         self.completion = None;
     }
+}
+
+/// /init 的模型提示词：分析代码库生成 MCODE.md（普通回合，模型用工具自采信息）。
+fn init_prompt() -> String {
+    [
+        "请分析当前代码库并生成 MCODE.md 项目说明文件（工作区根目录）。".to_string(),
+        "内容包含：项目用途（一句话）、目录结构速览、构建/测试命令、代码约定。".into(),
+        "已有 MCODE.md 则先读取并在其基础上增量完善；写完后只回复一句变更摘要。".into(),
+    ]
+    .join("\n")
+}
+
+/// effort 级别显示名。
+fn label_of_effort(e: mcode_core::api::ThinkingEffort) -> &'static str {
+    match e {
+        mcode_core::api::ThinkingEffort::Low => "low",
+        mcode_core::api::ThinkingEffort::Medium => "medium",
+        mcode_core::api::ThinkingEffort::High => "high",
+    }
+}
+
+/// /help 渲染：按 core 共享目录分组，每条指令「用法 — 作用」。
+fn render_help() -> Vec<String> {
+    let mut out = vec!["命令目录（/help <command> 看单条详情）：".to_string()];
+    for (group, cmds) in mcode_core::commands::groups_in_order() {
+        out.push(format!("· {}", group.title()));
+        for c in cmds {
+            out.push(format!("    {:<28} {}", c.usage, c.desc));
+        }
+    }
+    out.push(
+        "快捷键：shift+tab 切权限模式 · @文件 补全 · esc 打断 / 双 esc 回退 · ctrl+o 详情 · !cmd 跑 shell · ctrl+c 退出"
+            .into(),
+    );
+    out
 }
 
 #[cfg(test)]
@@ -839,6 +1059,7 @@ mod tests {
             scope: None,
         });
         s.apply_event(&AgentEvent::ToolResult {
+            display: None,
             name: "bash".into(),
             success: true,
             output: "ok".into(),
@@ -855,6 +1076,7 @@ mod tests {
 
         // 子代理 scope 前缀
         s.apply_event(&AgentEvent::ToolResult {
+            display: None,
             name: "read_file".into(),
             success: false,
             output: "not found".into(),
@@ -867,13 +1089,13 @@ mod tests {
     #[test]
     fn queue_fifo_drain() {
         let mut s = AppState::default();
-        s.queue.push_back("一".into());
-        s.queue.push_back("二".into());
+        s.queue.push_back(("一".into(), "一".into()));
+        s.queue.push_back(("二".into(), "二".into()));
         s.busy = true;
         s.finish_turn();
         assert!(!s.busy);
-        assert_eq!(s.dequeue_next().as_deref(), Some("一"));
-        assert_eq!(s.dequeue_next().as_deref(), Some("二"));
+        assert_eq!(s.dequeue_next().map(|(d, _)| d), Some("一".into()));
+        assert_eq!(s.dequeue_next().map(|(d, _)| d), Some("二".into()));
         assert_eq!(s.dequeue_next(), None);
     }
 
@@ -903,6 +1125,128 @@ mod tests {
         s.input = "/model deepseek-chat".into();
         s.submit();
         assert_eq!(s.model, "deepseek-chat");
+    }
+
+    #[test]
+    fn help_lists_usage_and_purpose_from_catalog() {
+        let mut s = AppState {
+            input: "/help".into(),
+            ..AppState::default()
+        };
+        assert_eq!(s.submit(), Some(Action::Local("help")));
+        // 用户要求：每条指令的提示都带用法+作用（渲染按列对齐，usage 与 desc 分开断言）
+        let joined: String = s
+            .lines
+            .iter()
+            .map(|l| l.text.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("/model [name]"), "{joined}");
+        assert!(joined.contains("查看或切换模型"), "{joined}");
+        assert!(joined.contains("/goal <objective>"), "{joined}");
+        assert!(joined.contains("/compact [instructions]"), "{joined}");
+        // /help <cmd> 单条
+        let mut t = AppState {
+            input: "/help model".into(),
+            ..AppState::default()
+        };
+        t.submit();
+        assert!(t.lines.last().unwrap().text.contains("查看或切换模型"));
+    }
+
+    #[test]
+    fn goal_dispatch_starts_cancels_and_guards() {
+        let mut s = AppState {
+            input: "/goal 把测试修绿".into(),
+            ..AppState::default()
+        };
+        match s.submit() {
+            Some(Action::Prompt { display, payload }) => {
+                assert_eq!(display, "/goal 把测试修绿");
+                assert!(payload.contains("[goal] 把测试修绿"));
+                assert!(payload.contains("GOAL_COMPLETE"));
+            }
+            other => panic!("应为 Prompt，实际 {other:?}"),
+        }
+        assert_eq!(s.goal.as_ref().unwrap().objective, "把测试修绿");
+
+        // 空参 = 取消
+        s.input = "/goal".into();
+        assert_eq!(s.submit(), Some(Action::Local("goal")));
+        assert!(s.goal.is_none(), "循环已取消");
+    }
+
+    #[test]
+    fn effort_and_mode_dispatch() {
+        let mut s = AppState {
+            input: "/effort high".into(),
+            ..AppState::default()
+        };
+        s.submit();
+        assert_eq!(s.effort, Some(mcode_core::api::ThinkingEffort::High));
+        s.input = "/effort".into();
+        s.submit(); // 只显示
+        assert_eq!(s.effort, Some(mcode_core::api::ThinkingEffort::High));
+        s.input = "/effort bogus".into();
+        s.submit();
+        assert_eq!(
+            s.effort,
+            Some(mcode_core::api::ThinkingEffort::High),
+            "坏参数不改值"
+        );
+
+        s.input = "/mode plan".into();
+        s.submit();
+        assert_eq!(s.mode, mcode_core::permission::Mode::Plan);
+        s.input = "/mode".into();
+        s.submit(); // 无参 = 循环
+        assert_ne!(s.mode, mcode_core::permission::Mode::Plan);
+        s.input = "/mode nope".into();
+        s.submit();
+        // 非法模式不变更
+    }
+
+    #[test]
+    fn runtime_cmds_carry_args() {
+        let mut s = AppState {
+            input: "/compact 保留测试相关内容".into(),
+            ..AppState::default()
+        };
+        assert_eq!(
+            s.submit(),
+            Some(Action::Runtime(RuntimeCmd::Compact(Some(
+                "保留测试相关内容".into()
+            ))))
+        );
+        s.input = "/compact".into();
+        assert_eq!(s.submit(), Some(Action::Runtime(RuntimeCmd::Compact(None))));
+        s.input = "/resume".into();
+        assert_eq!(s.submit(), Some(Action::Runtime(RuntimeCmd::Resume(None))));
+        s.input = "/resume abc123".into();
+        assert_eq!(
+            s.submit(),
+            Some(Action::Runtime(RuntimeCmd::Resume(Some("abc123".into()))))
+        );
+        s.input = "/rename 新标题".into();
+        assert_eq!(
+            s.submit(),
+            Some(Action::Runtime(RuntimeCmd::Rename("新标题".into())))
+        );
+        s.input = "/export out.md".into();
+        assert_eq!(
+            s.submit(),
+            Some(Action::Runtime(RuntimeCmd::Export(Some("out.md".into()))))
+        );
+        // 别名 exit → quit
+        s.input = "/exit".into();
+        assert_eq!(s.submit(), Some(Action::Local("quit")));
+        assert!(s.should_quit);
+        // 别名 ? → help
+        let mut t = AppState {
+            input: "/?".into(),
+            ..AppState::default()
+        };
+        assert_eq!(t.submit(), Some(Action::Local("help")));
     }
 
     #[test]
@@ -1170,6 +1514,7 @@ mod tests {
         assert_eq!(s.status, "运行 bash");
 
         s.apply_event(&AgentEvent::ToolResult {
+            display: None,
             name: "bash".into(),
             success: true,
             output: "ok".into(),
@@ -1220,29 +1565,48 @@ mod tests {
     #[test]
     fn slash_completion_lists_filters_and_accepts_commands() {
         let mut s = AppState::default();
-        s.set_slash_commands(vec![
-            "help".into(),
-            "clear".into(),
-            "context".into(),
-            "mode".into(),
-            "model".into(),
-        ]);
+        // 候选来自 core 共享目录（display = 用法 — 作用，insert = 纯命令名）
+        let all = builtin_slash_candidates();
+        let picks: Vec<_> = ["help", "clear", "context", "mode", "model"]
+            .iter()
+            .map(|n| all.iter().find(|c| c.insert == *n).unwrap().clone())
+            .collect();
+        s.set_slash_commands(picks);
 
-        // 敲 '/' 打开 → 全量命令（保持插入序）
+        // 敲 '/' 打开 → 全量命令（保持插入序；提示带用法+作用）
         s.input = "/".into();
         s.open_slash_completion();
         let c = s.completion.as_ref().expect("斜杠弹窗打开");
         assert_eq!(c.trigger, '/');
         assert_eq!(c.at, 0);
-        assert_eq!(
-            displays(&s),
-            vec!["help", "clear", "context", "mode", "model"]
+        let inserts: Vec<_> = s
+            .completion
+            .as_ref()
+            .unwrap()
+            .candidates
+            .iter()
+            .map(|c| c.insert.clone())
+            .collect();
+        assert_eq!(inserts, vec!["help", "clear", "context", "mode", "model"]);
+        assert!(
+            s.completion.as_ref().unwrap().candidates[4]
+                .display
+                .contains("查看或切换模型"),
+            "model 候选提示应带作用描述"
         );
 
-        // 继续敲 "mo" → 前缀过滤
+        // 继续敲 "mo" → 按 insert 前缀过滤
         s.input = "/mo".into();
         s.refresh_completion();
-        assert_eq!(displays(&s), vec!["mode", "model"]);
+        let inserts: Vec<_> = s
+            .completion
+            .as_ref()
+            .unwrap()
+            .candidates
+            .iter()
+            .map(|c| c.insert.clone())
+            .collect();
+        assert_eq!(inserts, vec!["mode", "model"]);
 
         // 接受 → "/mode "，弹窗消费
         s.accept_completion();

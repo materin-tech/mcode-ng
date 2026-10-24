@@ -10,6 +10,7 @@
 //! - shift+tab 循环权限模式（与 PermissionManager 同步）；
 //! - ctrl+o 简洁/详情视图；ctrl+c 退出（终端状态经 Drop 兜底恢复）。
 
+pub mod commands;
 pub mod complete;
 pub mod render;
 pub mod state;
@@ -28,7 +29,7 @@ use mcode_core::sessions::SessionStore;
 use mcode_core::subagents::AgentTaskStatus;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
-use state::{Action, AppState, Checkpoint, ConfirmPrompt, LineKind};
+use state::{Action, AppState, Checkpoint, ConfirmPrompt, GoalState, LineKind, RuntimeCmd};
 use std::collections::BTreeMap;
 use std::io::stdout;
 use std::sync::Arc;
@@ -123,6 +124,7 @@ fn spawn_shell(etx: mpsc::UnboundedSender<AgentEvent>, cwd: Arc<std::path::PathB
             name: "bash".into(),
             success,
             output,
+            display: None,
             scope: Some("shell".into()),
         });
     });
@@ -271,8 +273,186 @@ fn poll_task_table(
     }
 }
 
-/// TUI 入口。
+/// `RuntimeCmd` 落地：需要会话/存储/后端配合的斜杠命令。
+/// state 保持纯状态；这里才碰 IO。goal 续跑由主循环事件段注入 pending，不经此处。
+async fn handle_runtime(
+    rt: &Arc<SessionRuntime>,
+    conv: &Arc<Mutex<Conversation>>,
+    state: &mut AppState,
+    etx: &mpsc::UnboundedSender<AgentEvent>,
+    cmd: RuntimeCmd,
+) {
+    match cmd {
+        RuntimeCmd::Compact(instructions) => {
+            // 锁探测：回合运行中不压缩（等锁会跟下一回合的持锁互相顶）
+            if conv.try_lock().is_err() {
+                state.push_line(LineKind::System, "回合运行中，稍后再压缩");
+                return;
+            }
+            let rt2 = rt.clone();
+            let conv2 = conv.clone();
+            let etx2 = etx.clone();
+            let emit: mcode_core::agent::EventSink = Arc::new(move |e| {
+                let _ = etx2.send(e);
+            });
+            state.push_line(LineKind::System, "正在压缩历史…");
+            tokio::spawn(async move {
+                let mut guard = conv2.lock().await;
+                if let Err(e) = mcode_core::agent::compact::compact_conversation_with(
+                    &rt2.deps,
+                    &mut guard,
+                    &emit,
+                    instructions.as_deref(),
+                )
+                .await
+                {
+                    emit(AgentEvent::Error {
+                        message: e.to_string(),
+                    });
+                }
+            });
+        }
+        RuntimeCmd::Export(path) => {
+            let path = path
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("mcode-export.md"));
+            let guard = conv.lock().await;
+            match commands::export_markdown(&guard, &path) {
+                Ok(n) => state.push_line(
+                    LineKind::System,
+                    format!("✓ 已导出 {n} 条消息 → {}", path.display()),
+                ),
+                Err(e) => state.push_line(LineKind::System, format!("✗ 导出失败：{e:#}")),
+            }
+        }
+        RuntimeCmd::Rename(title) => {
+            let store = match mcode_core::sessions::SessionStore::for_project(&rt.deps.tool_ctx.cwd)
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    state.push_line(LineKind::System, format!("✗ 会话存储不可用：{e}"));
+                    return;
+                }
+            };
+            let id = rt
+                .deps
+                .session
+                .as_ref()
+                .map(|s| {
+                    s.path()
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string()
+                })
+                .unwrap_or_default();
+            match store.set_title(&id, Some(&title)) {
+                Ok(_) => state.push_line(LineKind::System, format!("✓ 会话已重命名 → {title}")),
+                Err(e) => state.push_line(LineKind::System, format!("✗ 重命名失败：{e}")),
+            }
+        }
+        RuntimeCmd::Resume(target) => {
+            let store = match mcode_core::sessions::SessionStore::for_project(&rt.deps.tool_ctx.cwd)
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    state.push_line(LineKind::System, format!("✗ 会话存储不可用：{e}"));
+                    return;
+                }
+            };
+            let list = store.list();
+            let Some(id_prefix) = target else {
+                state.push_line(LineKind::System, "本项目会话：");
+                for l in commands::resume_list_lines(&store) {
+                    state.push_line(LineKind::System, l);
+                }
+                state.push_line(LineKind::System, "用 /resume <id前缀> 打开");
+                return;
+            };
+            let hits: Vec<_> = list
+                .iter()
+                .filter(|s| s.session_id.starts_with(&id_prefix))
+                .collect();
+            match hits.len() {
+                0 => state.push_line(
+                    LineKind::System,
+                    format!("未找到 id 前缀 {id_prefix} 的会话；/resume 看清单"),
+                ),
+                1 => {
+                    state.resume_request = Some(hits[0].session_id.clone());
+                    state.should_quit = true;
+                }
+                n => {
+                    state.push_line(
+                        LineKind::System,
+                        format!("前缀 {id_prefix} 命中 {n} 个会话："),
+                    );
+                    for h in &hits {
+                        let id8: String = h.session_id.chars().take(12).collect();
+                        state.push_line(
+                            LineKind::System,
+                            format!(
+                                "  {id8}  「{}」",
+                                h.title.as_deref().unwrap_or("（无标题）")
+                            ),
+                        );
+                    }
+                    state.push_line(LineKind::System, "再加长前缀消歧");
+                }
+            }
+        }
+        RuntimeCmd::Provider(name) => {
+            let Some(name) = name else {
+                return; // 无参展示在 state 分派已覆盖不到，这里兜底（清单见 Local("provider")）
+            };
+            let mut cfg = match mcode_core::config::Config::load() {
+                Ok(c) => c,
+                Err(e) => {
+                    state.push_line(LineKind::System, format!("✗ 配置读取失败：{e:#}"));
+                    return;
+                }
+            };
+            match cfg.set_active_provider(&name) {
+                Ok(_) => match cfg.save() {
+                    Ok(_) => {
+                        state.push_line(
+                            LineKind::System,
+                            format!(
+                                "✓ provider → {name}（下一会话生效；/quit 后重进或 /resume 切换）"
+                            ),
+                        );
+                    }
+                    Err(e) => state.push_line(LineKind::System, format!("✗ 配置写入失败：{e:#}")),
+                },
+                Err(e) => state.push_line(LineKind::System, format!("✗ {e:#}")),
+            }
+        }
+    }
+}
+
+/// 单次会话的退出方式。
+enum SessionExit {
+    Quit,
+    /// /resume <id>：退出当前运行时，重建后载入该会话。
+    Switch(String),
+}
+
+/// TUI 入口（/resume 在会话间切换 = 重建运行时再进一轮）。
 pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Resume) -> Result<()> {
+    let mut resume = resume;
+    loop {
+        match run_session(model, fallback.clone(), resume.clone()).await? {
+            SessionExit::Quit => return Ok(()),
+            SessionExit::Switch(id) => resume = Resume::Id(id),
+        }
+    }
+}
+
+async fn run_session(
+    model: Option<&str>,
+    fallback: Option<Vec<String>>,
+    resume: Resume,
+) -> Result<SessionExit> {
     let cwd = std::env::current_dir()?;
     let config = mcode_core::config::Config::load()?;
     let desktop = mcode_core::config::DesktopConfig::load()?;
@@ -343,7 +523,7 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
             st.lines = replay;
             terminal.draw(|f| render::draw(f, &st))?;
             std::thread::sleep(Duration::from_millis(2500));
-            return Ok(());
+            return Ok(SessionExit::Quit);
         }
     };
     let replay = replay_lines(&conv);
@@ -358,11 +538,19 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
         ..Default::default()
     };
     state.set_workspace_root(cwd.clone());
-    let mut cmds: Vec<String> = state::BUILTIN_SLASH_COMMANDS
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    cmds.extend(rt.skills.names());
+    let mut cmds = state::builtin_slash_candidates();
+    // 技能候选：insert = 技能名（斜杠直达），display = 描述
+    for sk in rt.skills.all() {
+        cmds.push(complete::CompletionCandidate {
+            insert: sk.name.clone(),
+            display: format!("/{} — 技能：{}", sk.name, {
+                let d = sk.description.trim();
+                let head: String = d.chars().take(60).collect();
+                head
+            }),
+            is_dir: false,
+        });
+    }
     state.set_slash_commands(cmds);
     rt.deps.perms.lock().await.set_mode(state.mode);
     for l in replay {
@@ -390,15 +578,18 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
         state.push_line(LineKind::System, resume_note);
     }
 
-    // 待发起的回合（队列出队后在这里落地）+ 待应答的确认请求
-    let mut pending: Option<String> = None;
+    // 待发起的回合（队列出队后在这里落地）：(transcript 展示名, 发送载荷)
+    let mut pending: Option<(String, String)> = None;
     let mut confirm_responder: Option<tokio::sync::oneshot::Sender<Decision>> = None;
     let mut last_esc: Option<Instant> = None;
+    // goal 裁判 verdict 通道（判官任务在回合 Done 后 spawn，结果回流主循环）
+    let (gtx, mut grx) = mpsc::unbounded_channel::<bool>();
     // 后台任务轮询：上次状态快照 + 分频计数（POLL_MS 粒度凑出 ~1s）
     let mut task_seen: BTreeMap<String, AgentTaskStatus> = BTreeMap::new();
     let mut poll_tick: u32 = 0;
 
-    loop {
+    // 退出值由 loop 的 break 携带（Quit / 空 state 收官）；/resume 切换走下面的 return
+    let exit: SessionExit = loop {
         // 1) 回合事件 → 状态（Done 由回合契约保证必达，收尾 + 续发队列）
         while let Ok(e) = erx.try_recv() {
             let is_done = matches!(e, AgentEvent::Done { .. });
@@ -406,6 +597,81 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
             if is_done {
                 state.finish_turn();
                 pending = pending.or_else(|| state.dequeue_next());
+                // goal 外层循环：回合结束问裁判（esc 打断的空回复不算熔断）
+                if let Some(g) = state.goal.clone() {
+                    let cancelled = *rt.deps.tool_ctx.cancel.borrow();
+                    let reply = state
+                        .lines
+                        .iter()
+                        .rev()
+                        .find(|l| l.kind == LineKind::Assistant)
+                        .map(|l| l.text.clone())
+                        .unwrap_or_default();
+                    if reply.trim().is_empty() && !cancelled {
+                        // 空回复熔断：模型无产出还硬循环 = 烧钱不打粮食
+                        state.goal = None;
+                        state.push_line(
+                            LineKind::System,
+                            "🎯 goal 中止：模型空回复（防失控熔断，可重新 /goal 开启）",
+                        );
+                    } else {
+                        let model = state.model.clone();
+                        let make_backend = rt.deps.make_backend.clone();
+                        let gtx = gtx.clone();
+                        let cancel_rx = rt.deps.cancel_tx.subscribe();
+                        let objective = g.objective.clone();
+                        tokio::spawn(async move {
+                            let verdict = match make_backend(&model) {
+                                Ok(b) => {
+                                    mcode_core::agent::goal::check_goal_complete(
+                                        b.as_ref(),
+                                        &model,
+                                        &objective,
+                                        cancel_rx,
+                                    )
+                                    .await
+                                }
+                                Err(_) => false,
+                            };
+                            let _ = gtx.send(verdict);
+                        });
+                    }
+                }
+            }
+        }
+
+        // 1.4) goal 裁判 verdict：达成收官 / 否决续跑（轮数上限熔断）
+        while let Ok(accepted) = grx.try_recv() {
+            let Some(g) = state.goal.clone() else {
+                continue;
+            };
+            if accepted {
+                state.goal = None;
+                state.push_line(LineKind::System, "🎯 goal 已达成");
+            } else if g.round + 1 >= mcode_core::agent::goal::MAX_GOAL_ROUNDS {
+                state.goal = None;
+                state.push_line(
+                    LineKind::System,
+                    format!(
+                        "🎯 goal 已达 {} 轮上限，循环终止",
+                        mcode_core::agent::goal::MAX_GOAL_ROUNDS
+                    ),
+                );
+            } else {
+                state.goal = Some(GoalState {
+                    round: g.round + 1,
+                    ..g
+                });
+                state.push_line(LineKind::System, format!("🎯 goal 第 {} 轮", g.round + 1));
+                let payload = mcode_core::agent::goal::build_goal_prompt(
+                    &state.goal.as_ref().unwrap().objective,
+                );
+                let entry = ("🎯 goal 续跑".to_string(), payload);
+                if state.busy {
+                    state.queue.push_back(entry);
+                } else {
+                    pending = Some(entry);
+                }
             }
         }
 
@@ -432,11 +698,11 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
         }
 
         // 2) 发起回合（不 busy 时；expand 失败只报错不进模型）
-        if let Some(prompt) = pending.take() {
+        if let Some((display, payload)) = pending.take() {
             if state.busy {
-                state.queue.push_back(prompt);
+                state.queue.push_back((display, payload));
             } else {
-                let expanded_prompt = match expand_prompt(&rt, &prompt) {
+                let expanded_prompt = match expand_prompt(&rt, &payload) {
                     Ok(p) => p,
                     Err(msg) => {
                         state.push_line(LineKind::System, msg);
@@ -453,7 +719,7 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
                 state.status = "思考中".into();
                 state.turn_started = Some(std::time::Instant::now());
                 let line_index = state.lines.len();
-                state.push_line(LineKind::User, prompt.clone());
+                state.push_line(LineKind::User, display.clone());
                 // checkpoint：TUI 自己 push 拿消息 id（此刻无回合持锁）
                 let (cp_id, parent) = {
                     let mut guard = conv.lock().await;
@@ -466,16 +732,17 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
                 state.record_checkpoint(Checkpoint {
                     id: cp_id,
                     parent,
-                    prompt: prompt.clone(),
+                    prompt: display.clone(),
                     line_index,
                 });
                 let rt2 = rt.clone();
                 let conv2 = conv.clone();
                 let model_override = Some(state.model.clone());
+                let effort = state.effort;
                 tokio::spawn(async move {
                     rt2.deps.cancel_tx.send_replace(false);
                     let mut guard = conv2.lock().await;
-                    run_prepared(&rt2, &mut guard, model_override.as_deref(), emit).await;
+                    run_prepared(&rt2, &mut guard, model_override.as_deref(), effort, emit).await;
                 });
             }
         }
@@ -613,7 +880,14 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
                                     }
                                 } else if state.busy {
                                     let _ = rt.deps.cancel_tx.send(true);
-                                    state.push_line(LineKind::System, "正在打断…");
+                                    if state.goal.is_some() {
+                                        state.push_line(
+                                            LineKind::System,
+                                            "正在打断…（goal 循环继续，输入 /goal 取消）",
+                                        );
+                                    } else {
+                                        state.push_line(LineKind::System, "正在打断…");
+                                    }
                                 } else {
                                     state.clear_input();
                                 }
@@ -624,11 +898,23 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
                             }
                             KeyCode::Enter => match state.submit() {
                                 Some(Action::Send(prompt)) => {
+                                    let entry = (prompt.clone(), prompt);
                                     if state.busy {
-                                        state.queue.push_back(prompt);
+                                        state.queue.push_back(entry);
                                     } else {
-                                        pending = Some(prompt);
+                                        pending = Some(entry);
                                     }
+                                }
+                                Some(Action::Prompt { display, payload }) => {
+                                    let entry = (display, payload);
+                                    if state.busy {
+                                        state.queue.push_back(entry);
+                                    } else {
+                                        pending = Some(entry);
+                                    }
+                                }
+                                Some(Action::Runtime(cmd)) => {
+                                    handle_runtime(&rt, &conv, &mut state, &etx, cmd).await;
                                 }
                                 Some(Action::Bash(cmd)) => {
                                     spawn_shell(
@@ -637,7 +923,7 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
                                         cmd,
                                     );
                                 }
-                                Some(Action::Local("quit")) => break,
+                                Some(Action::Local("quit")) => break SessionExit::Quit,
                                 Some(Action::Local("context")) => {
                                     let guard = conv.lock().await;
                                     let used = mcode_core::token::raw_estimate_messages(
@@ -650,6 +936,353 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
                                         LineKind::System,
                                         format!("上下文估算 ~{used} / {window} tokens（{pct}%）"),
                                     );
+                                }
+                                Some(Action::Local("mode")) => {
+                                    // 修复：/mode 此前只改 state 不同步 PermissionManager
+                                    rt.deps.perms.lock().await.set_mode(state.mode);
+                                }
+                                Some(Action::Local("token")) => {
+                                    let guard = conv.lock().await;
+                                    let used = mcode_core::token::raw_estimate_messages(
+                                        &guard.active_messages(),
+                                    );
+                                    let window =
+                                        mcode_core::agent::context_window_for_model(&rt.deps.model);
+                                    let pct = used * 100 / window.max(1);
+                                    drop(guard);
+                                    state.push_line(
+                                        LineKind::System,
+                                        format!(
+                                            "上下文 ~{used}/{window} tokens（{pct}%）· 本会话累计 ↑{} ↓{}",
+                                            state.tokens.input, state.tokens.output
+                                        ),
+                                    );
+                                }
+                                Some(Action::Local("status")) => {
+                                    let session = rt
+                                        .deps
+                                        .session
+                                        .as_ref()
+                                        .map(|s| {
+                                            s.path()
+                                                .file_stem()
+                                                .unwrap_or_default()
+                                                .to_string_lossy()
+                                                .to_string()
+                                        })
+                                        .unwrap_or_else(|| "（未持久化）".into());
+                                    let provider = config
+                                        .active_provider
+                                        .clone()
+                                        .unwrap_or_else(|| "（未配置）".into());
+                                    let effort = state
+                                        .effort
+                                        .map(|e| match e {
+                                            mcode_core::api::ThinkingEffort::Low => "low",
+                                            mcode_core::api::ThinkingEffort::Medium => "medium",
+                                            mcode_core::api::ThinkingEffort::High => "high",
+                                        })
+                                        .unwrap_or("默认");
+                                    state.push_line(
+                                        LineKind::System,
+                                        format!(
+                                            "MCode v{} · 会话 {} · 模型 {} · provider {provider} · 权限 {} · effort {effort} · {}",
+                                            env!("CARGO_PKG_VERSION"),
+                                            session.chars().take(12).collect::<String>(),
+                                            state.model,
+                                            state.mode.label(),
+                                            if state.busy { "回合进行中" } else { "空闲" },
+                                        ),
+                                    );
+                                    if let Some(g) = &state.goal {
+                                        state.push_line(
+                                            LineKind::System,
+                                            format!(
+                                                "🎯 goal 进行中（第 {} 轮）：{}",
+                                                g.round, g.objective
+                                            ),
+                                        );
+                                    }
+                                }
+                                Some(Action::Local("doctor")) => {
+                                    for c in commands::run_doctor(
+                                        &config,
+                                        &mcode_core::config::DesktopConfig::load()
+                                            .unwrap_or_default(),
+                                        &rt.deps.tool_ctx.cwd,
+                                        &rt.mcp_report,
+                                    ) {
+                                        state.push_line(
+                                            LineKind::System,
+                                            format!(
+                                                "{} {}：{}",
+                                                if c.ok { "✓" } else { "✗" },
+                                                c.name,
+                                                c.note
+                                            ),
+                                        );
+                                    }
+                                }
+                                Some(Action::Local("permissions")) => {
+                                    let perms = rt.deps.perms.lock().await;
+                                    let rules: Vec<String> = perms
+                                        .rules()
+                                        .iter()
+                                        .map(|r| {
+                                            format!(
+                                                "  {} {} → {}",
+                                                r.tool,
+                                                r.pattern,
+                                                if r.allow { "ALLOW" } else { "DENY" }
+                                            )
+                                        })
+                                        .collect();
+                                    state.push_line(
+                                        LineKind::System,
+                                        format!(
+                                            "权限模式：{} · 持久规则 {} 条\n{}",
+                                            perms.mode.label(),
+                                            rules.len(),
+                                            if rules.is_empty() {
+                                                "  （无）".to_string()
+                                            } else {
+                                                rules.join("\n")
+                                            }
+                                        ),
+                                    );
+                                }
+                                Some(Action::Local("mcp")) => {
+                                    let desktop = mcode_core::config::DesktopConfig::load()
+                                        .unwrap_or_default();
+                                    if desktop.mcp_servers.is_empty() {
+                                        state.push_line(
+                                            LineKind::System,
+                                            "未配置 MCP server（desktop.json 的 mcp_servers）",
+                                        );
+                                    }
+                                    for srv in &desktop.mcp_servers {
+                                        let target = match (&srv.command, &srv.url) {
+                                            (c, _) if !c.is_empty() => format!("stdio {c}"),
+                                            (_, Some(u)) => format!("http {u}"),
+                                            _ => "（未配置传输）".to_string(),
+                                        };
+                                        let warn = rt.mcp_report.iter().find(|w| {
+                                            w.contains(&format!("MCP server {}", srv.name))
+                                        });
+                                        let dot = if !srv.enabled {
+                                            "⚪"
+                                        } else if warn.is_some() {
+                                            "🔴"
+                                        } else {
+                                            "🟢"
+                                        };
+                                        state.push_line(
+                                            LineKind::System,
+                                            format!(
+                                                "{} {}（{}）{}",
+                                                dot,
+                                                srv.name,
+                                                target,
+                                                warn.map(|w| format!(" — {w}")).unwrap_or_default()
+                                            ),
+                                        );
+                                    }
+                                }
+                                Some(Action::Local("hooks")) => match &rt.deps.hooks {
+                                    None => state.push_line(
+                                        LineKind::System,
+                                        "未配置 hooks（desktop.json 的 hooks）",
+                                    ),
+                                    Some(h) => {
+                                        let cfgs = h.configs();
+                                        state.push_line(
+                                            LineKind::System,
+                                            format!("hooks {} 条：", cfgs.len()),
+                                        );
+                                        for c in cfgs {
+                                            state.push_line(
+                                                LineKind::System,
+                                                format!(
+                                                    "  {:?} match=`{}` → {}（超时 {}s）",
+                                                    c.event,
+                                                    c.matcher,
+                                                    c.command,
+                                                    c.timeout_secs.unwrap_or(60)
+                                                ),
+                                            );
+                                        }
+                                    }
+                                },
+                                Some(Action::Local("agents")) => {
+                                    let agents = rt.agents.all();
+                                    if agents.is_empty() {
+                                        state.push_line(LineKind::System, "未找到 subagent 定义（~/.mcode/agents 或 .mcode/agents）");
+                                    }
+                                    for a in agents {
+                                        let when: String =
+                                            a.when_to_use.trim().chars().take(52).collect();
+                                        state.push_line(
+                                            LineKind::System,
+                                            format!(
+                                                "  {} · {} · {}",
+                                                a.agent_type,
+                                                a.model.as_deref().unwrap_or("默认模型"),
+                                                when
+                                            ),
+                                        );
+                                    }
+                                }
+                                Some(Action::Local("skills")) => {
+                                    let skills = rt.skills.all();
+                                    if skills.is_empty() {
+                                        state.push_line(
+                                            LineKind::System,
+                                            "未找到技能（~/.mcode/skills 或 .mcode/skills）",
+                                        );
+                                    }
+                                    for sk in skills {
+                                        let desc: String =
+                                            sk.description.trim().chars().take(60).collect();
+                                        state.push_line(
+                                            LineKind::System,
+                                            format!("  /{} — {}", sk.name, desc),
+                                        );
+                                    }
+                                    state.push_line(
+                                        LineKind::System,
+                                        "提示：直接输入 /<技能名> 调用技能",
+                                    );
+                                }
+                                Some(Action::Local("provider")) => {
+                                    let ps: Vec<String> = config
+                                        .providers
+                                        .iter()
+                                        .map(|p| {
+                                            if Some(&p.name) == config.active_provider.as_ref() {
+                                                format!("● {}", p.name)
+                                            } else {
+                                                format!("○ {}", p.name)
+                                            }
+                                        })
+                                        .collect();
+                                    state.push_line(
+                                        LineKind::System,
+                                        format!(
+                                            "providers（切换：/provider <name>）：{}",
+                                            ps.join("  ")
+                                        ),
+                                    );
+                                }
+                                Some(Action::Local("files")) => {
+                                    let mut seen: Vec<String> = vec![];
+                                    if let Some(sess) = &rt.deps.session {
+                                        if let Ok(lines) =
+                                            mcode_core::sessions::read_lines(sess.path())
+                                        {
+                                            for l in lines {
+                                                if let mcode_core::sessions::Line::Snapshot(snap) =
+                                                    l
+                                                {
+                                                    let p = snap.path.display().to_string();
+                                                    if !seen.contains(&p) {
+                                                        seen.push(p);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if seen.is_empty() {
+                                        state.push_line(
+                                            LineKind::System,
+                                            "本会话还没有文件快照（写入类工具才会产生）",
+                                        );
+                                    } else {
+                                        state.push_line(
+                                            LineKind::System,
+                                            format!("本会话修改过的文件 {} 个：", seen.len()),
+                                        );
+                                        for f in seen {
+                                            state.push_line(LineKind::System, format!("  {f}"));
+                                        }
+                                    }
+                                }
+                                Some(Action::Local("diff")) => {
+                                    match commands::git_diff_stat(&rt.deps.tool_ctx.cwd) {
+                                        Some(stat) => {
+                                            for l in stat.lines() {
+                                                state.push_line(LineKind::System, l.to_string());
+                                            }
+                                        }
+                                        None => state.push_line(
+                                            LineKind::System,
+                                            "无 git 变更（或当前目录不是 git 仓库）",
+                                        ),
+                                    }
+                                }
+                                Some(Action::Local("save")) => match &rt.deps.session {
+                                    Some(s) => state.push_line(
+                                        LineKind::System,
+                                        format!("✓ 会话实时落盘中：{}", s.path().display()),
+                                    ),
+                                    None => {
+                                        state.push_line(LineKind::System, "当前会话未启用持久化")
+                                    }
+                                },
+                                Some(Action::Local("copy")) => {
+                                    let text = state
+                                        .lines
+                                        .iter()
+                                        .rev()
+                                        .find(|l| l.kind == LineKind::Assistant)
+                                        .map(|l| l.text.clone())
+                                        .unwrap_or_default();
+                                    if text.is_empty() {
+                                        state.push_line(LineKind::System, "暂无助手回复可复制");
+                                    } else {
+                                        match commands::copy_to_clipboard(&text) {
+                                            Ok(_) => state.push_line(
+                                                LineKind::System,
+                                                "✓ 已复制最后一条回复到剪贴板",
+                                            ),
+                                            Err(e) => state.push_line(
+                                                LineKind::System,
+                                                format!("✗ 复制失败：{e:#}"),
+                                            ),
+                                        }
+                                    }
+                                }
+                                Some(Action::Local("memory")) => {
+                                    let path = rt.deps.tool_ctx.cwd.join("MCODE.md");
+                                    if !path.exists() {
+                                        let _ = std::fs::write(&path, "");
+                                    }
+                                    let editor = std::env::var("EDITOR")
+                                        .or_else(|_| std::env::var("VISUAL"))
+                                        .unwrap_or_else(|_| {
+                                            if cfg!(windows) {
+                                                "notepad".into()
+                                            } else {
+                                                "vi".into()
+                                            }
+                                        });
+                                    // 挂起 TUI：还原终端 → 编辑器接管 → 重建终端
+                                    let _ = disable_raw_mode();
+                                    let _ = crossterm::execute!(stdout(), LeaveAlternateScreen);
+                                    let status =
+                                        std::process::Command::new(&editor).arg(&path).status();
+                                    let _ = enable_raw_mode();
+                                    let _ = crossterm::execute!(stdout(), EnterAlternateScreen);
+                                    terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+                                    match status {
+                                        Ok(st) if st.success() => state.push_line(
+                                            LineKind::System,
+                                            format!("✓ MCODE.md 已保存（{}）", path.display()),
+                                        ),
+                                        _ => state.push_line(
+                                            LineKind::System,
+                                            format!("✗ 编辑器 {editor} 未正常退出"),
+                                        ),
+                                    }
                                 }
                                 Some(Action::Local(_)) => {}
                                 None => {}
@@ -677,11 +1310,15 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
         // 4) 绘制 + 退出判定
         terminal.draw(|f| render::draw(f, &state))?;
         if state.should_quit {
-            break;
+            break SessionExit::Quit;
         }
-    }
+    };
 
-    Ok(())
+    // /resume 切换：带上目标 id 退出，外层重建运行时再进
+    if let Some(id) = state.resume_request.take() {
+        return Ok(SessionExit::Switch(id));
+    }
+    Ok(exit)
 }
 
 #[cfg(test)]

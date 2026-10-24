@@ -33,6 +33,10 @@ pub struct SessionRuntime {
     >,
     /// 后台子代理任务表（task/task_output/task_stop 共享；TUI 轮询状态变化）。
     pub task_table: mcode_core::subagents::TaskTable,
+    /// 子代理注册表（内置 + 用户 + 项目；/agents 展示用）。
+    pub agents: mcode_core::subagents::AgentRegistry,
+    /// MCP 注册告警（单 server 连接失败等；/mcp /doctor 展示用）。
+    pub mcp_report: Vec<String>,
 }
 
 /// 装配运行时。`backend_override` 供测试注入假 backend 工厂（None = 按配置
@@ -78,7 +82,7 @@ pub async fn build_runtime(
 
     // MCP：懒连接，注册工具清单；单个 server 挂不拖垮整体。
     let mcp = McpManager::from_configs(&desktop.mcp_servers);
-    mcp.register_into(&registry).await;
+    let mcp_report = mcp.register_into(&registry).await;
 
     // 会话：先建（HookRunner 需要 session_id），再装配其余部件。
     let store = SessionStore::for_project(cwd)?;
@@ -108,6 +112,7 @@ pub async fn build_runtime(
     // 技能与子代理：用户/项目/插件三层目录组合（项目覆盖用户）。
     let skills = load_skill_registry(cwd);
     let agents = load_agent_registry(cwd);
+    let agents_for_rt = load_agent_registry(cwd);
 
     let deps = AgentDeps {
         model: model.clone(),
@@ -141,6 +146,8 @@ pub async fn build_runtime(
         },
         confirm_rx: Arc::new(tokio::sync::Mutex::new(confirm_rx)),
         task_table,
+        agents: agents_for_rt,
+        mcp_report,
     })
 }
 
