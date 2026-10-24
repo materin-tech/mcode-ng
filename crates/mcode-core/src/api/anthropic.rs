@@ -206,8 +206,16 @@ struct AnthropicSse {
 
 enum BlockAcc {
     Text,
-    Thinking { signature: String },
-    Tool { id: String, json: String },
+    Thinking {
+        signature: String,
+    },
+    /// `start_input`：部分兼容网关（MiniMax /anthropic）把完整参数放在
+    /// content_block_start.input 且不发分片——留作收口兜底。
+    Tool {
+        id: String,
+        json: String,
+        start_input: Value,
+    },
     Other,
 }
 
@@ -296,11 +304,17 @@ impl AnthropicSse {
                             .and_then(|x| x.as_str())
                             .unwrap_or("")
                             .to_string();
+                        // start 可能已带完整 input（兼容网关形态）——仅在非空对象时记录
+                        let start_input = match block.get("input") {
+                            Some(v @ Value::Object(map)) if !map.is_empty() => v.clone(),
+                            _ => Value::Null,
+                        };
                         self.blocks.insert(
                             index,
                             BlockAcc::Tool {
                                 id: id.clone(),
                                 json: String::new(),
+                                start_input,
                             },
                         );
                         Some(Ok(StreamEvent::ToolUseStart { id, name }))
@@ -368,12 +382,23 @@ impl AnthropicSse {
             "content_block_stop" => {
                 let index = v.get("index").and_then(|x| x.as_u64()).unwrap_or(0);
                 match self.blocks.remove(&index) {
-                    Some(BlockAcc::Tool { id, json, .. }) => {
-                        let input: Value = if json.trim().is_empty() {
-                            json!({})
+                    Some(BlockAcc::Tool {
+                        id,
+                        json,
+                        start_input,
+                    }) => {
+                        // 兜底优先级：完整分片解析 > start.input > 空对象
+                        let parsed: Option<Value> = if json.trim().is_empty() {
+                            None
                         } else {
-                            serde_json::from_str(&json).unwrap_or(json!({}))
+                            serde_json::from_str(&json).ok()
                         };
+                        let input = parsed
+                            .or_else(|| match start_input {
+                                v @ Value::Object(_) if !v.is_null() => Some(v),
+                                _ => None,
+                            })
+                            .unwrap_or_else(|| json!({}));
                         Some(Ok(StreamEvent::ToolUseDone { id, input }))
                     }
                     Some(BlockAcc::Thinking { signature }) => Some(Ok(StreamEvent::ThinkingDone {
@@ -550,6 +575,44 @@ mod tests {
             StreamEvent::Done { stop_reason } => assert_eq!(*stop_reason, StopReason::ToolUse),
             other => panic!("expected Done, got {other:?}"),
         }
+    }
+
+    /// MiniMax 等 /anthropic 兼容层：参数完整出现在 content_block_start.input、
+    /// 不发（或只发空）input_json_delta——收口必须回退到 start 的 input。
+    #[test]
+    fn tool_input_in_start_used_when_deltas_missing() {
+        let out = run(vec![
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"bash","input":{"command":"ls"}}}"#,
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":""}}"#,
+            r#"{"type":"content_block_stop","index":0}"#,
+        ]);
+        let done = out
+            .iter()
+            .find_map(|e| match e {
+                StreamEvent::ToolUseDone { id, input } => Some((id.clone(), input.clone())),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(done.0, "t1");
+        assert_eq!(done.1["command"], "ls");
+    }
+
+    /// 分片 JSON 残缺时同样回退 start.input（兜底优先级：完整分片 > start.input > 空对象）。
+    #[test]
+    fn broken_delta_json_falls_back_to_start_input() {
+        let out = run(vec![
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t2","name":"bash","input":{"command":"pwd"}}}"#,
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"command\":"}}"#,
+            r#"{"type":"content_block_stop","index":0}"#,
+        ]);
+        let done = out
+            .iter()
+            .find_map(|e| match e {
+                StreamEvent::ToolUseDone { id, input } => Some((id.clone(), input.clone())),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(done.1["command"], "pwd");
     }
 
     #[test]

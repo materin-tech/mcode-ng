@@ -114,6 +114,8 @@ fn compact(n: u64) -> String {
 #[derive(Debug, Default)]
 pub struct AppState {
     pub input: String,
+    /// 输入光标（input 的字节偏移，恒在字符边界上；输入框可见光标由它驱动）。
+    pub cursor: usize,
     /// 当前模型（/model <name> 运行中切换；回合经 RunOpts.model 下发）。
     pub model: String,
     /// 权限模式（shift+tab 循环；与 PermissionManager 同步）。
@@ -385,7 +387,81 @@ impl AppState {
 
     /// 取走输入缓冲（清空 + 光标归零语义由 input 单字符串承载）。
     fn take_input(&mut self) -> String {
+        self.cursor = 0;
         std::mem::take(&mut self.input)
+    }
+
+    // -----------------------------------------------------------------------
+    // 输入光标编辑（字节偏移 + 字符边界安全，CJK 不撕裂）
+    // -----------------------------------------------------------------------
+
+    /// 把光标收回到合法位置（≤ len 且落在字符边界上）。
+    fn clamp_cursor(&mut self) {
+        let mut c = self.cursor.min(self.input.len());
+        while c > 0 && !self.input.is_char_boundary(c) {
+            c -= 1;
+        }
+        self.cursor = c;
+    }
+
+    /// 整体替换输入（历史回溯/补全重写后调用），光标归末尾。
+    fn set_input(&mut self, s: String) {
+        self.cursor = s.len();
+        self.input = s;
+        self.clamp_cursor();
+    }
+
+    pub fn clear_input(&mut self) {
+        self.input.clear();
+        self.cursor = 0;
+    }
+
+    pub fn cursor_left(&mut self) {
+        let mut c = self.cursor.saturating_sub(1);
+        while c > 0 && !self.input.is_char_boundary(c) {
+            c -= 1;
+        }
+        self.cursor = c;
+    }
+
+    pub fn cursor_right(&mut self) {
+        let mut c = (self.cursor + 1).min(self.input.len());
+        while c < self.input.len() && !self.input.is_char_boundary(c) {
+            c += 1;
+        }
+        self.cursor = c;
+    }
+
+    pub fn cursor_home(&mut self) {
+        self.cursor = 0;
+    }
+
+    pub fn cursor_end(&mut self) {
+        self.cursor = self.input.len();
+    }
+
+    /// 光标处插入字符。
+    pub fn insert_char(&mut self, ch: char) {
+        let at = self.cursor;
+        self.input.insert(at, ch);
+        self.cursor = at + ch.len_utf8();
+    }
+
+    /// 退格：删光标前一字符。
+    pub fn backspace(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        self.cursor_left();
+        self.input.remove(self.cursor);
+    }
+
+    /// delete：删光标处字符。
+    pub fn delete(&mut self) {
+        if self.cursor < self.input.len() {
+            self.input.remove(self.cursor);
+            self.clamp_cursor();
+        }
     }
 
     /// ↑/↓ 历史回溯。
@@ -398,7 +474,7 @@ impl AppState {
             Some(p) => p.saturating_sub(1),
         };
         self.history_pos = Some(pos);
-        self.input = self.history[pos].clone();
+        self.set_input(self.history[pos].clone());
     }
 
     pub fn history_next(&mut self) {
@@ -407,10 +483,10 @@ impl AppState {
             Some(p) => {
                 if p + 1 >= self.history.len() {
                     self.history_pos = None;
-                    self.input.clear();
+                    self.clear_input();
                 } else {
                     self.history_pos = Some(p + 1);
-                    self.input = self.history[p + 1].clone();
+                    self.set_input(self.history[p + 1].clone());
                 }
             }
         }
@@ -586,7 +662,7 @@ impl AppState {
         let c = self.completion.take()?;
         let path = c.candidates.get(c.selected)?.clone();
         let head = self.input[..c.at].to_string();
-        self.input = format!("{head}{}{path} ", c.trigger);
+        self.set_input(format!("{head}{}{path} ", c.trigger));
         Some(path)
     }
 
@@ -598,6 +674,81 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_editing_insert_move_delete() {
+        let mut s = AppState::default();
+        for ch in "ab".chars() {
+            s.insert_char(ch);
+        }
+        assert_eq!(s.input, "ab");
+        assert_eq!(s.cursor, 2);
+        s.cursor_left();
+        assert_eq!(s.cursor, 1, "光标落在字符边界");
+        s.insert_char('X');
+        assert_eq!(s.input, "aXb", "中间插入而非末尾");
+        assert_eq!(s.cursor, 2);
+        s.backspace();
+        assert_eq!(s.input, "ab", "退格删光标前一字符");
+        assert_eq!(s.cursor, 1);
+        s.delete();
+        assert_eq!(s.input, "a", "delete 删光标处字符");
+        assert_eq!(s.cursor, 1);
+    }
+
+    #[test]
+    fn cursor_editing_multibyte_safe() {
+        let mut s = AppState::default();
+        for ch in "中文".chars() {
+            s.insert_char(ch);
+        }
+        assert_eq!(s.cursor, 6);
+        s.cursor_left();
+        assert_eq!(s.cursor, 3, "按字符移动，不落在 UTF-8 序列中间");
+        s.backspace();
+        assert_eq!(s.input, "文");
+        assert_eq!(s.cursor, 0);
+        s.cursor_left();
+        assert_eq!(s.cursor, 0, "行首不再左移");
+        s.delete();
+        assert_eq!(s.input, "", "行首 delete 删唯一字符");
+    }
+
+    #[test]
+    fn cursor_home_end_and_history_resets() {
+        let mut s = AppState {
+            history: vec!["旧输入".into()],
+            ..Default::default()
+        };
+        s.insert_char('h');
+        s.cursor_home();
+        assert_eq!(s.cursor, 0);
+        s.cursor_end();
+        assert_eq!(s.cursor, 1);
+        s.history_prev();
+        assert_eq!(s.input, "旧输入");
+        assert_eq!(s.cursor, 9, "换入历史后光标回末尾（3 汉字 × 3 字节）");
+        s.cursor_home();
+        s.history_next();
+        assert_eq!(s.input, "");
+        assert_eq!(s.cursor, 0);
+    }
+
+    #[test]
+    fn accept_completion_puts_cursor_at_end() {
+        let mut s = AppState::default();
+        let mut files = vec!["src/main.rs".to_string(), "docs/guide.md".to_string()];
+        files.sort();
+        s.set_workspace_files(files);
+        // 忠实按键序：'@' 打开 → 敲片段刷新 → Tab 接受
+        s.input = "@".into();
+        s.open_completion();
+        s.input = "@ma".into();
+        s.refresh_completion();
+        s.accept_completion();
+        assert_eq!(s.input, "@src/main.rs ");
+        assert_eq!(s.cursor, s.input.len(), "补全后光标落在新输入末尾");
+    }
 
     #[test]
     fn submit_dispatches_slash_and_plain() {

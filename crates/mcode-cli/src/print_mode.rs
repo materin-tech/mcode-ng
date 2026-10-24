@@ -106,12 +106,21 @@ pub async fn run_print(
             anyhow::bail!("print 模式不支持会话选择：请用 --resume <id>")
         }
     };
-    let outcome = run_turn(&rt, &mut conv, prompt, Arc::new(print_sink)).await;
+    // 文本已随 TextDelta 流式上屏 → 收尾不再重打 reply（否则输出重复一遍）
+    let streamed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = streamed.clone();
+    let sink: EventSink = Arc::new(move |e| {
+        if matches!(e, AgentEvent::TextDelta(_)) {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        print_sink(e);
+    });
+    let outcome = run_turn(&rt, &mut conv, prompt, sink).await;
     if let Some(err) = outcome.error {
         eprintln!("错误：{err}");
         std::process::exit(1);
     }
-    if !outcome.reply.is_empty() {
+    if !outcome.reply.is_empty() && !streamed.load(std::sync::atomic::Ordering::Relaxed) {
         println!("{}", outcome.reply);
     }
     Ok(())

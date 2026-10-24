@@ -615,7 +615,7 @@ pub async fn run(model: Option<&str>, fallback: Option<Vec<String>>, resume: Res
                                     let _ = rt.deps.cancel_tx.send(true);
                                     state.push_line(LineKind::System, "正在打断…");
                                 } else {
-                                    state.input.clear();
+                                    state.clear_input();
                                 }
                             }
                             KeyCode::BackTab => {

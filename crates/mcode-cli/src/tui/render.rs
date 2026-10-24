@@ -10,6 +10,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line as RLine, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// 处理按键（编辑/滚动/模式/退出）；返回是否被消费。
 pub fn on_key(state: &mut AppState, key: KeyEvent) -> bool {
@@ -20,6 +21,30 @@ pub fn on_key(state: &mut AppState, key: KeyEvent) -> bool {
         }
         KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.show_details = !state.show_details;
+            true
+        }
+        KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            state.cursor_home();
+            true
+        }
+        KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            state.cursor_end();
+            true
+        }
+        KeyCode::Left => {
+            state.cursor_left();
+            true
+        }
+        KeyCode::Right => {
+            state.cursor_right();
+            true
+        }
+        KeyCode::Home => {
+            state.cursor_home();
+            true
+        }
+        KeyCode::End => {
+            state.cursor_end();
             true
         }
         KeyCode::PageUp => {
@@ -47,15 +72,37 @@ pub fn on_key(state: &mut AppState, key: KeyEvent) -> bool {
             true
         }
         KeyCode::Backspace => {
-            state.input.pop();
+            state.backspace();
+            true
+        }
+        KeyCode::Delete => {
+            state.delete();
             true
         }
         KeyCode::Enter => true, // 交给 run 循环（要触发 send 逻辑）
-        KeyCode::Char(ch) => {
-            state.input.push(ch);
+        KeyCode::Char(ch)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            state.insert_char(ch);
             true
         }
         _ => false,
+    }
+}
+
+/// 单行输入框横向滚动：保证 `cursor_col` 落在 `[scroll, scroll+width)` 视窗内。
+pub(crate) fn composer_scroll(cursor_col: usize, width: usize, scroll: usize) -> usize {
+    if width == 0 {
+        return 0;
+    }
+    if cursor_col < scroll {
+        cursor_col
+    } else if cursor_col >= scroll + width {
+        cursor_col + 1 - width
+    } else {
+        scroll
     }
 }
 
@@ -379,17 +426,42 @@ fn draw_composer(f: &mut Frame, state: &AppState, area: Rect) {
     } else {
         "输入".to_string()
     };
-    let para = Paragraph::new(state.input.as_str())
-        .wrap(Wrap { trim: false })
-        .block(Block::default().borders(Borders::ALL).title(Span::styled(
-            title,
-            Style::default().fg(if state.busy {
-                Color::Yellow
-            } else {
-                Color::Blue
-            }),
-        )));
-    f.render_widget(para, area);
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        title,
+        Style::default().fg(if state.busy {
+            Color::Yellow
+        } else {
+            Color::Blue
+        }),
+    ));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // 单行行编辑器视窗：按显示宽度截取，光标始终可见；终端光标画在插入位。
+    let width = inner.width as usize;
+    let mut cols: Vec<(char, usize)> = Vec::with_capacity(state.input.chars().count());
+    let mut col = 0usize;
+    for ch in state.input.chars() {
+        cols.push((ch, col));
+        col += UnicodeWidthChar::width(ch).unwrap_or(0).max(1);
+    }
+    let cursor_col = UnicodeWidthStr::width(&state.input[..state.cursor]);
+    let scroll = composer_scroll(cursor_col, width, 0);
+    let mut visible = String::new();
+    for (ch, c) in &cols {
+        let cw = UnicodeWidthChar::width(*ch).unwrap_or(0).max(1);
+        if *c >= scroll && *c + cw <= scroll + width {
+            visible.push(*ch);
+        }
+    }
+    let para = Paragraph::new(visible.as_str());
+    f.render_widget(para, inner);
+    if width > 0 {
+        f.set_cursor_position(ratatui::layout::Position {
+            x: inner.x + (cursor_col - scroll) as u16,
+            y: inner.y,
+        });
+    }
 }
 
 fn draw_statusline(f: &mut Frame, state: &AppState, area: Rect) {
@@ -514,6 +586,17 @@ mod tests {
         assert_eq!(transcript_window(5, 10, 0), (0, 5));
         // 偏移超过内容：视口清空
         assert_eq!(transcript_window(5, 10, 50), (0, 0));
+    }
+
+    #[test]
+    fn composer_scroll_keeps_cursor_in_view() {
+        // 光标在视窗内：窗口不动
+        assert_eq!(composer_scroll(3, 10, 0), 0);
+        // 光标越出右缘：窗口右移到光标贴右
+        assert_eq!(composer_scroll(10, 10, 0), 1);
+        assert_eq!(composer_scroll(30, 10, 0), 21);
+        // 零宽视窗：安全归零
+        assert_eq!(composer_scroll(5, 0, 3), 0);
     }
 
     #[test]
