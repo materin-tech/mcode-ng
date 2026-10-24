@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::app::App;
 use crate::views::theme::*;
+use mcode_core::transcript::NoticeKind;
 
 /// 右键上下文菜单状态（渲染为绝对定位浮层）
 pub(crate) struct CtxMenu {
@@ -184,7 +185,7 @@ impl App {
     /// 删除会话：jsonl + 标题 sidecar 落盘删除；删的是当前会话则重建 harness（新会话）。
     pub(crate) fn delete_session(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(store) = self.store.clone() else {
-            self.push_notice("✗ 会话存储未初始化".to_string(), true);
+            self.push_notice("会话存储未初始化", NoticeKind::Error);
             cx.notify();
             return;
         };
@@ -194,9 +195,9 @@ impl App {
                     self.rebuild_harness(cx);
                 }
                 self.refresh_sessions();
-                self.push_notice("✓ 会话已删除".to_string(), false);
+                self.push_notice("会话已删除", NoticeKind::Success);
             }
-            Err(e) => self.push_notice(format!("✗ 删除会话失败：{e}"), true),
+            Err(e) => self.push_notice(format!("删除会话失败：{e}"), NoticeKind::Error),
         }
         cx.notify();
     }
@@ -243,7 +244,7 @@ impl App {
         self.session_rename = None;
         // 空标题拒绝：弹窗已关，sidecar 标题保持
         if title.is_empty() {
-            self.push_notice("✗ 标题不能为空".to_string(), true);
+            self.push_notice("标题不能为空", NoticeKind::Error);
             cx.notify();
             return;
         }
@@ -251,9 +252,9 @@ impl App {
             Some(store) => {
                 crate::app::extension_manage::rename_session(store, &id, Some(&title));
                 self.refresh_sessions();
-                self.push_notice(format!("✓ 已重命名 → {title}"), false);
+                self.push_notice(format!("已重命名 → {title}"), NoticeKind::Success);
             }
-            None => self.push_notice("✗ 会话存储未初始化".to_string(), true),
+            None => self.push_notice("会话存储未初始化", NoticeKind::Error),
         }
         cx.notify();
     }
@@ -291,7 +292,7 @@ impl App {
             CtxAction::Reveal => {
                 let mut cmd = build_reveal_command(path);
                 if let Err(e) = cmd.spawn() {
-                    self.push_notice(format!("⚠ 无法打开文件管理器: {e}"), true);
+                    self.push_notice(format!("无法打开文件管理器: {e}"), NoticeKind::Warning);
                 }
                 true
             }

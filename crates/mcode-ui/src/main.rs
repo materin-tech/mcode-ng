@@ -21,8 +21,8 @@ use views::file_explorer;
 
 use app::App;
 use gpui::{
-    Application, Bounds, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, actions,
-    prelude::*, px, size,
+    Application, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowBounds, WindowOptions,
+    actions, prelude::*, px, size,
 };
 
 actions!(desktop, [Quit]);
@@ -67,6 +67,7 @@ fn main() {
             KeyBinding::new("secondary-,", app::OpenSettings, None),
             KeyBinding::new("secondary-e", app::OpenExtensions, None),
             KeyBinding::new("secondary-j", app::OpenSessions, None),
+            KeyBinding::new("ctrl-o", app::ToggleDetail, None),
             // 文件浏览器键上下文（焦点在浏览器时优先于全局绑定）
             KeyBinding::new("secondary-c", file_explorer::FsCopy, Some("FileExplorer")),
             KeyBinding::new("secondary-x", file_explorer::FsCut, Some("FileExplorer")),
@@ -88,6 +89,12 @@ fn main() {
         ]);
         cx.on_action(|_: &Quit, cx| cx.quit());
 
+        // 菜单栏（macOS 顶栏）。菜单点击经 App::dispatch_action 走活动窗口的
+        // 焦点路径分发——与按键共用 chat_view 里的 on_action 监听器，无需新注册。
+        cx.set_menus(app_menus());
+        // Dock 图标右键菜单：关窗后台常驻时从这里回主界面
+        cx.set_dock_menu(vec![MenuItem::action("新对话", app::NewChat)]);
+
         // 全局句柄必须先初始化——spawn_main_window 会读写它（曾因缺失导致启动即崩）
         cx.set_global(MainWindowHandle::default());
         let root = spawn_main_window(cx);
@@ -98,6 +105,40 @@ fn main() {
 
 /// ti 模块别名（KeyBinding 列表内引用 text_input 的动作类型）
 use views::text_input as ti;
+
+/// 应用菜单栏。关窗后进程常驻（见 on_reopen），菜单栏仍在——这是
+/// 「状态栏运行」的入口：从菜单/Dock 图标随时唤回主窗口。
+fn app_menus() -> Vec<Menu> {
+    vec![
+        Menu {
+            name: "MCode Desktop".into(),
+            items: vec![
+                MenuItem::action("设置…", app::OpenSettings),
+                MenuItem::separator(),
+                MenuItem::action("退出 MCode Desktop", Quit),
+            ],
+        },
+        Menu {
+            name: "文件".into(),
+            items: vec![
+                MenuItem::action("新对话", app::NewChat),
+                MenuItem::action("会话记录…", app::OpenSessions),
+                MenuItem::separator(),
+                MenuItem::action("扩展…", app::OpenExtensions),
+            ],
+        },
+        Menu {
+            name: "编辑".into(),
+            items: vec![
+                MenuItem::action("剪切", ti::Cut),
+                MenuItem::action("拷贝", ti::Copy),
+                MenuItem::action("粘贴", ti::Paste),
+                MenuItem::separator(),
+                MenuItem::action("全选", ti::SelectAll),
+            ],
+        },
+    ]
+}
 
 /// 主窗口句柄全局（Dock reopen 重建用）
 #[derive(Default)]

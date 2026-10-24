@@ -11,10 +11,10 @@ pub mod context_menu;
 pub mod dialogs;
 pub mod file_explorer;
 pub mod i18n;
-pub mod markdown_view;
 pub mod sidebar_view;
 pub mod text_input;
 pub mod theme;
+pub mod transcript_view;
 pub mod workspace_picker;
 
 use gpui::{
@@ -22,6 +22,7 @@ use gpui::{
     rgb,
 };
 use mcode_core::permission::Mode;
+use mcode_core::transcript::NoticeKind;
 
 use crate::app::msg::trunc;
 use crate::app::session_ops::{lang_label, lang_next};
@@ -286,7 +287,7 @@ pub fn render_settings(app: &mut App, cx: &mut gpui::Context<App>) -> AnyElement
                                 if this.cfg.set_active_provider(&pname).is_ok() {
                                     this.save_cfg_and_rebuild(cx);
                                     let m = this.cfg.active_model().unwrap_or_default();
-                                    this.push_notice(format!("✓ {pname} → {m}"), false);
+                                    this.push_notice(format!("{pname} → {m}"), NoticeKind::Success);
                                 }
                                 cx.notify();
                             }))
@@ -365,7 +366,7 @@ pub fn render_settings(app: &mut App, cx: &mut gpui::Context<App>) -> AnyElement
                             .on_click(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
                                 if this.set_model(&model) {
                                     this.save_cfg_and_rebuild(cx);
-                                    this.push_notice(format!("✓ → {model}"), false);
+                                    this.push_notice(format!("→ {model}"), NoticeKind::Success);
                                 }
                                 cx.notify();
                             }))
@@ -804,7 +805,10 @@ pub fn render_extensions(app: &mut App, cx: &mut gpui::Context<App>) -> AnyEleme
                         if d.set_mcp_enabled(&tog_name, !now_enabled).is_ok() {
                             d.save().ok();
                             this.rebuild_harness(cx);
-                            this.push_notice(format!("✓ MCP `{tog_name}` 已切换"), false);
+                            this.push_notice(
+                                format!("MCP `{tog_name}` 已切换"),
+                                NoticeKind::Success,
+                            );
                         }
                         cx.notify();
                     }),

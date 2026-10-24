@@ -201,8 +201,8 @@ impl TranscriptState {
         self.interrupt_requested = true;
     }
 
-    /// 回合收尾（Done/Error 后调用）：全流式块定稿、状态复位。
-    fn end_turn(&mut self) {
+    /// 回合收尾（Done/Error 前后调用）：全流式块定稿、状态复位。
+    pub fn end_turn(&mut self) {
         self.finalize_streams();
         self.busy = false;
         self.stream_mode = StreamMode::Idle;

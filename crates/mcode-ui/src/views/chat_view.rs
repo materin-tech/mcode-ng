@@ -4,20 +4,21 @@
 
 //! chat 布局渲染 — 布局规范 = docs/prototype/screens/chat.html：
 //! 侧栏（会话/占用）+ 顶栏（模型/路径/模式/goal 徽章）+ 消息流（工具卡/diff/Notice）+ Composer。
-//! 共享渲染小件（badge / tool_icon）也在这里，供 views.rs 的页面视图复用。
+//! 共享渲染小件（badge）也在这里，供 views.rs 的页面视图复用。
 
 use gpui::{
     AnyElement, Context, Div, Focusable, InteractiveElement, SharedString,
     StatefulInteractiveElement, Window, div, prelude::*, px, rgb,
 };
 use mcode_core::permission::Decision;
+use mcode_core::transcript::Block;
 
 use crate::app::goal::MAX_GOAL_ROUNDS;
-use crate::app::msg::ChatMsg;
 use crate::app::msg::trunc;
 use crate::app::{App, View};
 use crate::views::sidebar_view::{render_sidebar, render_sidebar_collapsed};
 use crate::views::theme::*;
+use crate::views::transcript_view::styled_line;
 
 /// 渲染分发：Onboarding / Settings / Extensions / Sessions / Chat
 pub(crate) fn render_app(app: &mut App, window: &mut Window, cx: &mut Context<App>) -> AnyElement {
@@ -52,6 +53,7 @@ pub(crate) fn render_app(app: &mut App, window: &mut Window, cx: &mut Context<Ap
 
 fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> AnyElement {
     let mc = mode_color(app.mode);
+    let bash_mode = app.input.read(cx).text().starts_with('!');
     let model_label: SharedString = format!(
         "🧠 {}",
         app.cfg
@@ -71,15 +73,101 @@ fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> An
         badge(label, YELLOW)
     });
 
-    // 消息流
-    let last_idx = app.messages.len().saturating_sub(1);
-    let scroll = &app.thinking_scroll;
-    let message_list: Vec<_> = app
-        .messages
+    // 消息流：transcript 块 → CLI 共享渲染核（render_block，width=MAX 由 gpui 折行）
+    // → StyledText。冻结边界之前的块按定稿样式画；Thinking 头行可点切换详情（CLI ctrl+o）。
+    let detail = app.transcript.detail_view;
+    let blink_on = (app.frame_tick / 10).is_multiple_of(2);
+    let boundary = app.transcript.frozen_boundary();
+    let message_list: Vec<AnyElement> = app
+        .transcript
+        .blocks
         .iter()
         .enumerate()
-        .map(|(i, m)| render_msg(i, i == last_idx, m, scroll, cx))
+        .flat_map(|(i, b)| {
+            let lines =
+                mcode_core::transcript::render_block(b, detail, usize::MAX, blink_on, i < boundary);
+            let mut els: Vec<AnyElement> = lines
+                .iter()
+                .enumerate()
+                .map(|(j, l)| {
+                    let line_el = styled_line(l);
+                    let clickable = matches!(b, Block::Thinking { .. }) && j == 0;
+                    if clickable {
+                        div()
+                            .id(SharedString::from(format!("think-head-{i}")))
+                            .cursor_pointer()
+                            .hover(|s| s.bg(crate::views::theme::BG_HOVER))
+                            .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+                                this.toggle_detail();
+                                cx.notify();
+                            }))
+                            .child(line_el)
+                            .into_any_element()
+                    } else {
+                        div().child(line_el).into_any_element()
+                    }
+                })
+                .collect();
+            // 块间空行分隔（CLI 帧内块的语义间隔）
+            els.push(div().h_2().into_any_element());
+            els
+        })
         .collect();
+
+    // spinner 状态行（CLI：✻ Verb… (esc to interrupt · …)）；宽度给 MAX 保留全部片段
+    let spinner_line = if app.transcript.busy {
+        let elapsed = app
+            .transcript
+            .turn_started
+            .map(|t| t.elapsed().as_secs())
+            .unwrap_or(0);
+        let frame = mcode_core::transcript::spinner::frame_at(app.frame_tick);
+        Some(styled_line(&mcode_core::transcript::spinner::status_line(
+            app.transcript.spinner_verb,
+            frame,
+            app.frame_tick,
+            elapsed,
+            app.transcript.turn_tokens,
+            usize::MAX,
+            None,
+        )))
+    } else {
+        None
+    };
+
+    // footer（CLI 口径）：detail 提示 / 模式 chip / 距 auto-compact 百分比 / 快捷键兜底
+    let mut footer_chips: Vec<(SharedString, gpui::Rgba)> = Vec::new();
+    if app.transcript.detail_view {
+        footer_chips.push((
+            "Showing detailed transcript · ctrl+o to toggle".into(),
+            TEXT_3,
+        ));
+    }
+    match app.mode {
+        mcode_core::permission::Mode::Plan => {
+            footer_chips.push(("⏸ plan mode on (⇧Tab)".into(), BLUE))
+        }
+        mcode_core::permission::Mode::Auto => {
+            footer_chips.push(("⏵⵵ accept edits on (⇧Tab)".into(), YELLOW))
+        }
+        mcode_core::permission::Mode::Passon => {
+            footer_chips.push(("⏵⵵ bypass permissions on (⇧Tab)".into(), RED))
+        }
+        mcode_core::permission::Mode::Manual => {}
+    }
+    {
+        let model = app
+            .harness
+            .as_ref()
+            .map(|h| h.deps.current_model())
+            .unwrap_or_default();
+        let cw = mcode_core::agent::context_window_for_model(&model);
+        if cw > 0
+            && let Some(pct) = (app.ctx_tokens * 100).checked_div(cw)
+        {
+            footer_chips.push((format!("{pct}% until auto-compact").into(), TEXT_3));
+        }
+    }
 
     // 补全面板
     let palette_open = app.completion.is_open() && !app.candidates.is_empty();
@@ -100,7 +188,8 @@ fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> An
                     div()
                         .text_color(if sel { ACCENT } else { TEXT_1 })
                         .font_family("Menlo")
-                        .child(c.name.clone()),
+                        // 候选统一带 `/` 前缀展示（core 指令与技能同口径；insert 由 apply 拼回）
+                        .child(format!("/{}", c.name)),
                 )
                 .when(!c.desc.is_empty(), |d| {
                     d.child(div().text_color(TEXT_3).child(c.desc.clone()))
@@ -434,8 +523,17 @@ fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> An
                                 }),
                         )
                         .child(queue_banner)
+                        .when_some(spinner_line, |d, sp| {
+                            d.child(
+                                div()
+                                    .px_5()
+                                    .py_1()
+                                    .text_size(px(12.))
+                                    .child(sp),
+                            )
+                        })
                         .child(
-                            // Composer
+                            // Composer（bash 模式：`!` 前缀 → CLI 同款橙色边框）
                             div().px_5().pb_3()
                                 .when(palette_open, |d| {
                                     d.child(
@@ -455,7 +553,7 @@ fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> An
                                     div()
                                         .rounded_lg()
                                         .border_1()
-                                        .border_color(BORDER_STRONG)
+                                        .border_color(if bash_mode { ACCENT } else { BORDER_STRONG })
                                         .bg(BG_PANEL)
                                         .overflow_hidden()
                                         .child(app.input.clone())
@@ -465,14 +563,31 @@ fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> An
                                                 .items_center()
                                                 .gap_2()
                                                 .px_3()
-                .items_center()
                                                 .pb_2()
                                                 .text_size(px(10.5))
                                                 .text_color(TEXT_3)
-                                                .child("⏎ 发送 · / 指令 · @ 文件 · ⇧Tab 模式 · ESC 打断"),
+                                                .child(
+                                                    "⏎ 发送 · / 指令 · @ 文件 · ! bash · ⇧Tab 模式 · ESC 打断",
+                                                ),
                                         ),
                                 ),
-                        ),
+                        )
+                        .when(!footer_chips.is_empty(), |d| {
+                            d.child(
+                                div()
+                                    .px_5()
+                                    .pb_2()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_0p5()
+                                    .children(footer_chips.iter().map(|(label, color)| {
+                                        div()
+                                            .text_size(px(10.5))
+                                            .text_color(*color)
+                                            .child(label.clone())
+                                    })),
+                            )
+                        }),
                 )
                 .when(app.explorer_visible, |d| {
                     d.child(crate::views::file_explorer::render_file_explorer(app, cx))
@@ -482,271 +597,6 @@ fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> An
         // （重命名弹窗/右键菜单已上移到 render_app 顶层，全视图可用且盖住管理对话框）
         .when_some(perm_overlay, |d, ov| d.child(ov))
         .into_any_element()
-}
-
-// ---------- 消息渲染 ----------
-
-/// 消息折叠头部行（💭/回复 · 行数 · ▾/▸，点击循环三态）
-fn fold_head(
-    id: &'static str,
-    label: SharedString,
-    idx: usize,
-    cx: &mut Context<App>,
-) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(SharedString::from(format!("{id}-{idx}")))
-        .flex()
-        .items_center()
-        .cursor_pointer()
-        .hover(|s| s.bg(BG_HOVER))
-        .text_size(px(11.5))
-        .text_color(TEXT_3)
-        .on_click(cx.listener(move |this, _: &gpui::ClickEvent, _, cx| {
-            this.cycle_message_fold(idx);
-            cx.notify();
-        }))
-        .child(label)
-}
-
-fn render_msg(
-    idx: usize,
-    is_last: bool,
-    m: &ChatMsg,
-    scroll: &gpui::ScrollHandle,
-    cx: &mut Context<App>,
-) -> AnyElement {
-    match m {
-        ChatMsg::User { text, refs } => div()
-            .mb_3()
-            .max_w(px(860.))
-            .child(
-                div()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(BORDER)
-                    .bg(BG_PANEL)
-                    .px_3()
-                    .py_2()
-                    .text_color(TEXT_1)
-                    .child(text.clone()),
-            )
-            .children(refs.iter().map(|r| {
-                div()
-                    .mr_1()
-                    .mt_1()
-                    .px_1p5()
-                    .rounded_sm()
-                    .text_size(px(11.))
-                    .text_color(BLUE)
-                    .child(r.clone())
-            })),
-        ChatMsg::Assistant { text, fold } => {
-            let n_lines = text.lines().count();
-            let head: SharedString = match fold {
-                crate::app::msg::FoldState::Expanded => format!("▾ 回复 · {n_lines} 行").into(),
-                crate::app::msg::FoldState::Preview => {
-                    format!("▸ 回复 · 前 10 行 / 共 {n_lines} 行").into()
-                }
-                crate::app::msg::FoldState::Collapsed => format!("▸ 回复 · 共 {n_lines} 行").into(),
-            };
-            let body = match fold {
-                crate::app::msg::FoldState::Expanded => {
-                    crate::views::markdown_view::render_markdown(text)
-                }
-                crate::app::msg::FoldState::Preview => {
-                    // 预览：前 10 行对应的 markdown（尾部提示在头部行）
-                    let head_part: String = text.lines().take(10).collect::<Vec<_>>().join("\n");
-                    crate::views::markdown_view::render_markdown(&head_part)
-                }
-                crate::app::msg::FoldState::Collapsed => {
-                    let first: SharedString = trunc(text.lines().next().unwrap_or(""), 80).into();
-                    div().text_color(TEXT_2).text_size(px(12.5)).child(first)
-                }
-            };
-            div()
-                .mb_3()
-                .max_w(px(860.))
-                .flex()
-                .flex_col()
-                .child(fold_head("reply-head", head, idx, cx).pl_1())
-                .child(body)
-        }
-        ChatMsg::Thinking { text, fold } => {
-            let count = text.chars().count();
-            let state_label = match fold {
-                crate::app::msg::FoldState::Expanded => "▾",
-                _ => "▸",
-            };
-            let head: SharedString = format!(
-                "💭 {} · {count} 字符 {state_label}",
-                if is_last {
-                    "思考中…"
-                } else {
-                    "思考过程"
-                }
-            )
-            .into();
-            let base = div()
-                .mb_2()
-                .max_w(px(860.))
-                .rounded_sm()
-                .border_1()
-                .border_color(BORDER)
-                .bg(BG_PANEL);
-            match fold {
-                crate::app::msg::FoldState::Expanded => base
-                    .flex()
-                    .flex_col()
-                    .child(fold_head("think-head", head, idx, cx))
-                    .child(
-                        // 展开态：限高 160px 滚动区，流式写入时 scroll_to_bottom 跟随
-                        div()
-                            .id(SharedString::from(format!("think-body-{idx}")))
-                            .mx_2()
-                            .mb_2()
-                            .max_h(px(160.))
-                            .overflow_y_scroll()
-                            .track_scroll(scroll)
-                            .rounded_sm()
-                            .bg(BG_WINDOW)
-                            .p_2()
-                            .font_family("Menlo")
-                            .text_size(px(10.5))
-                            .text_color(TEXT_3)
-                            .child(SharedString::from(trunc(text, 30_000))),
-                    ),
-                crate::app::msg::FoldState::Preview => base
-                    .flex()
-                    .flex_col()
-                    .child(fold_head("think-head", head, idx, cx))
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("think-body-{idx}")))
-                            .mx_2()
-                            .mb_2()
-                            .max_h(px(80.))
-                            .overflow_y_scroll()
-                            .rounded_sm()
-                            .bg(BG_WINDOW)
-                            .p_2()
-                            .font_family("Menlo")
-                            .text_size(px(10.5))
-                            .text_color(TEXT_3)
-                            .child(SharedString::from(trunc(text, 3_000))),
-                    ),
-                crate::app::msg::FoldState::Collapsed => {
-                    base.child(fold_head("think-head", head, idx, cx))
-                }
-            }
-        }
-        ChatMsg::ToolCard {
-            name,
-            args,
-            summary,
-            running,
-            success,
-        } => {
-            let (icon, color) = tool_icon(name);
-            let status: SharedString = if *running {
-                "◌ 运行中".into()
-            } else if *success {
-                format!("✓ {summary}").into()
-            } else {
-                format!("✗ {summary}").into()
-            };
-            div()
-                .mb_2()
-                .max_w(px(860.))
-                .rounded_md()
-                .border_1()
-                .border_color(BORDER)
-                .bg(BG_PANEL)
-                .px_3()
-                .py_1p5()
-                .flex()
-                .items_center()
-                .gap_2()
-                .text_size(px(12.))
-                .child(div().text_color(color).child(icon.to_string()))
-                .child(div().text_color(TEXT_1).child(name.clone()))
-                .child(div().text_color(TEXT_3).child(args.clone()))
-                .child(
-                    div()
-                        .ml_auto()
-                        .text_color(if *running {
-                            YELLOW
-                        } else if *success {
-                            GREEN
-                        } else {
-                            RED
-                        })
-                        .child(status),
-                )
-        }
-        ChatMsg::Diff { path, lines } => {
-            let mut wrap = div()
-                .mb_2()
-                .max_w(px(860.))
-                .rounded_md()
-                .border_1()
-                .border_color(BORDER)
-                .bg(BG_WINDOW)
-                .overflow_hidden()
-                .child(
-                    div()
-                        .px_3()
-                        .py_1()
-                        .text_size(px(11.))
-                        .text_color(TEXT_3)
-                        .child(path.clone()),
-                );
-            for l in lines {
-                let (bg, fg) = if l.hunk {
-                    (BG_WINDOW, PURPLE)
-                } else if l.add {
-                    (rgb(0x1b2a1e), rgb(0x9fd9a3))
-                } else if l.del {
-                    (rgb(0x2d1b1b), rgb(0xeb9a9a))
-                } else {
-                    (BG_WINDOW, TEXT_3)
-                };
-                let prefix = if l.add {
-                    "+"
-                } else if l.del {
-                    "-"
-                } else {
-                    " "
-                };
-                wrap = wrap.child(
-                    div()
-                        .bg(bg)
-                        .px_3()
-                        .text_size(px(11.5))
-                        .font_family("Menlo")
-                        .text_color(fg)
-                        .child(SharedString::from(format!("{prefix}{}", l.text))),
-                );
-            }
-            wrap
-        }
-        ChatMsg::Notice { text, error } => div()
-            .mb_2()
-            .max_w(px(860.))
-            .rounded_sm()
-            .border_1()
-            .border_color(if *error { RED } else { BORDER })
-            .bg(if *error { rgb(0x2d1b1b) } else { BG_PANEL })
-            .px_2()
-            .py_1()
-            .text_size(px(11.5))
-            .text_color(if *error { RED } else { TEXT_2 })
-            .child(text.clone()),
-        ChatMsg::Running => div()
-            .mb_3()
-            .text_color(ACCENT)
-            .child("◌ 运行中…  （ESC 打断）"),
-    }
-    .into_any_element()
 }
 
 // ---------- 共享渲染小件 ----------
@@ -783,21 +633,4 @@ fn perm_btn(
         .hover(|s| s.bg(BG_HOVER))
         .on_click(on_click)
         .child(label.to_string())
-}
-
-/// 工具类别 → (图标, 语义色)
-pub(crate) fn tool_icon(name: &str) -> (&'static str, gpui::Rgba) {
-    if name == "task" {
-        ("⚡", PURPLE)
-    } else if name == "bash" {
-        ("▶", YELLOW)
-    } else if matches!(name, "read_file" | "glob" | "grep" | "ls") {
-        ("📄", BLUE)
-    } else if matches!(name, "edit_file" | "write_file") {
-        ("✏️", GREEN)
-    } else if name.starts_with("mcp__") {
-        ("🔗", BLUE)
-    } else {
-        ("✏️", GREEN)
-    }
 }

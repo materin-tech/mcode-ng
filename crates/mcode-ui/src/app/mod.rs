@@ -18,8 +18,7 @@ pub mod session_ops;
 pub mod system_prompt;
 
 use gpui::{
-    App as GpuiApp, Context, Entity, FocusHandle, Focusable, Render, SharedString, Window, actions,
-    prelude::*,
+    App as GpuiApp, Context, Entity, FocusHandle, Focusable, Render, Window, actions, prelude::*,
 };
 use mcode_core::agent::AgentEvent;
 use mcode_core::agent::runner::{RunOpts, run_agent_turn};
@@ -29,8 +28,8 @@ use mcode_core::permission::{Decision, Mode};
 use mcode_core::sessions::{SessionStore, SessionSummary};
 use mcode_core::skills::SkillDefinition;
 use mcode_core::subagents::AgentDefinition;
-use mcode_core::tools::DisplayBlock;
-use mcode_core::util::file_refs::{expand_file_refs, extract_refs};
+use mcode_core::transcript::{NoticeKind, TranscriptState};
+use mcode_core::util::file_refs::expand_file_refs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -38,7 +37,7 @@ use tokio::sync::Mutex;
 use crate::app::commands::{filter_commands, slash_skill_candidates};
 use crate::app::completion::{Candidate, CompletionState, InputHistory, Trigger};
 use crate::app::goal::{MAX_GOAL_ROUNDS, build_goal_prompt, check_goal_complete};
-use crate::app::msg::{ChatMsg, DiffLine, FoldState, PendingPermission, default_fold_for, trunc};
+use crate::app::msg::PendingPermission;
 use crate::app::runtime::{Harness, UiEvent, UiRuntime, event_sink};
 use crate::app::session_ops::current_effort;
 use crate::app::system_prompt::{SystemPromptOpts, build_pua_directive, build_system_prompt};
@@ -56,7 +55,8 @@ actions!(
         OpenSettings,
         OpenExtensions,
         OpenSessions,
-        BackToChat
+        BackToChat,
+        ToggleDetail
     ]
 );
 
@@ -142,9 +142,13 @@ pub struct App {
     pub cfg: Config,
     /// run_agent_turn 消费的历史（回合任务持锁期间 UI 用 try_lock 只读）
     pub(crate) hist: Arc<Mutex<Conversation>>,
-    pub messages: Vec<ChatMsg>,
+    /// 对话呈现状态（与 CLI 共用的唯一事实源；渲染走 render_block）
+    pub transcript: TranscriptState,
+    /// 运行中排队插话（finish_run 出队时再分类解释）
     pub(crate) queue: Vec<String>,
     pub(crate) running: bool,
+    /// spinner/blink 动画帧计数（运行中每 120ms 前进一格）
+    pub(crate) frame_tick: u64,
     pub(crate) completion: CompletionState,
     pub(crate) candidates: Vec<Candidate>,
     pub(crate) history: InputHistory,
@@ -166,10 +170,6 @@ pub struct App {
     /// 上次估算的上下文 token（回合运行中 conv 锁被回合任务持有，渲染用缓存）
     pub(crate) ctx_tokens: usize,
     pub view: View,
-    /// 思考块默认展开（流式实时观察，不合理随时 ESC 打断；对齐 CLI 折叠语义）
-    pub thinking_default_expanded: bool,
-    /// 当前流式思考块的滚动跟随句柄（scroll_to_bottom 每次追加时置位）
-    pub(crate) thinking_scroll: gpui::ScrollHandle,
     /// 消息区滚动句柄（跟随模式每帧钉底）
     pub(crate) chat_scroll: gpui::ScrollHandle,
     /// 消息区滚动跟随：上翻即暂停，贴底（连续下滚 offset 不再变化）或点按钮恢复
@@ -257,9 +257,14 @@ impl App {
             harness: None,
             cfg: cfg.clone(),
             hist: Arc::new(Mutex::new(Conversation::new())),
-            messages: vec![],
+            transcript: TranscriptState::new(
+                cfg.active_model()
+                    .unwrap_or_else(|| "mcode".to_string())
+                    .as_str(),
+            ),
             queue: vec![],
             running: false,
+            frame_tick: 0,
             completion: CompletionState::default(),
             candidates: vec![],
             history: InputHistory::default(),
@@ -274,11 +279,6 @@ impl App {
             goal_rounds: 0,
             tokens_total: 0,
             ctx_tokens: 0,
-            thinking_default_expanded: true,
-            thinking_scroll: gpui::ScrollHandle::new(),
-            chat_scroll: gpui::ScrollHandle::new(),
-            chat_follow: true,
-            chat_last_down_y: None,
             view: if test_mode {
                 View::Chat
             } else if needs_onboarding {
@@ -287,6 +287,9 @@ impl App {
                 // 启动首屏：工作区选择器（IDEA 等同；选定后才落 cwd 构建 harness）
                 View::WorkspacePicker
             },
+            chat_scroll: gpui::ScrollHandle::new(),
+            chat_follow: true,
+            chat_last_down_y: None,
             sidebar_collapsed: false,
             explorer_visible: true,
             show_hidden: false,
@@ -307,6 +310,26 @@ impl App {
         cx.subscribe(&me.input, |this, _, event, cx| match event {
             InputEvent::Submit(text) => this.send(text.clone(), cx),
             InputEvent::Changed(text) => this.sync_completion(text),
+        })
+        .detach();
+        // spinner/blink 动画节拍：运行中每 120ms 前进一帧并通知重绘（空闲不空转）
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(120))
+                    .await;
+                if this
+                    .update(cx, |app, cx| {
+                        if app.running {
+                            app.frame_tick = app.frame_tick.wrapping_add(1);
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
         })
         .detach();
         // 非 onboarding 启动：构建 harness（失败 → Notice 引导去设置，不 panic）；
@@ -339,7 +362,10 @@ impl App {
         let store = match SessionStore::for_project(&self.cwd) {
             Ok(s) => s,
             Err(e) => {
-                self.push_notice(format!("会话目录初始化失败：{e}").to_string(), true);
+                self.push_notice(
+                    format!("会话目录初始化失败：{e}").to_string(),
+                    NoticeKind::Info,
+                );
                 cx.notify();
                 return;
             }
@@ -350,7 +376,7 @@ impl App {
                 self.ext_agents = h.agents.all().into_iter().cloned().collect();
                 let harness = Arc::new(h);
                 for w in &harness.mcp_report {
-                    self.push_notice(format!("⚠ MCP：{w}"), true);
+                    self.push_notice(format!("MCP：{w}"), NoticeKind::Warning);
                 }
                 self.harness = Some(harness);
                 self.hist = conv;
@@ -358,7 +384,10 @@ impl App {
                 self.attach_pump(cx);
             }
             Err(e) => {
-                self.push_notice(format!("初始化失败：{e}（cmd-, 打开设置）"), true);
+                self.push_notice(
+                    format!("初始化失败：{e}（cmd-, 打开设置）"),
+                    NoticeKind::Info,
+                );
             }
         }
         self.refresh_sessions();
@@ -390,10 +419,42 @@ impl App {
         }
         self.completion.close();
         self.history.push(text.clone());
-        // running 时入队（指令出队时再解释）
+        // 首次发送后 placeholder 切为队列编辑提示（CLI 同款语义）
+        if !self.transcript.submitted_once {
+            self.set_placeholder("Press up to edit queued messages", cx);
+        }
+        // running 时入队（finish_run 出队时再分类解释）
         if self.running {
             self.queue.push(text);
             cx.notify();
+            return;
+        }
+        self.dispatch_input(text, cx);
+    }
+
+    /// 更新 Composer placeholder（CLI 语义：首发后切队列编辑提示，新会话复位）
+    pub(crate) fn set_placeholder(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.input
+            .update(cx, |ti, _| ti.placeholder = text.to_owned().into());
+    }
+
+    /// transcript 复位（/clear、new_chat、resume 共用）：新状态 + placeholder 复位
+    pub(crate) fn reset_transcript(&mut self, cx: &mut Context<Self>) {
+        let model = self
+            .harness
+            .as_ref()
+            .map(|h| h.deps.current_model())
+            .unwrap_or_default();
+        self.transcript = TranscriptState::new(&model);
+        self.chat_follow = true;
+        self.chat_last_down_y = None;
+        self.set_placeholder("Try: 帮我看看这个仓库的结构", cx);
+    }
+
+    /// 输入分类：`!` → 本地 bash；`/` → 指令；其余 → 模型回合（CLI classify_input 同构）
+    fn dispatch_input(&mut self, text: String, cx: &mut Context<Self>) {
+        if let Some(cmd) = text.strip_prefix('!') {
+            self.run_bash_local(cmd.trim().to_string(), cx);
             return;
         }
         // 指令本地解释，不进模型回合
@@ -404,7 +465,71 @@ impl App {
         self.launch_turn(text, cx);
     }
 
-    /// 启动一次模型回合：@ 引用展开 → UI 占位 → spawn run_agent_turn
+    /// `!` 本地 bash：push_user("!cmd") + shell 三事件（ToolUseStart/InputDelta/
+    /// Result，scope="shell"），与 CLI spawn_shell 同构。不 begin_turn——bash
+    /// 旁路不显示 spinner（CLI 同款）。
+    fn run_bash_local(&mut self, cmd: String, cx: &mut Context<Self>) {
+        if cmd.is_empty() {
+            return;
+        }
+        let Some(h) = self.harness.clone() else {
+            self.push_notice("未初始化完成，无法执行本地命令", NoticeKind::Error);
+            cx.notify();
+            return;
+        };
+        self.transcript.push_user(&format!("!{cmd}"));
+        let id = mcode_core::util::now_ms().to_string();
+        let _ = h.ui_tx.send(UiEvent::Agent(AgentEvent::ToolUseStart {
+            id: id.clone(),
+            name: "bash".into(),
+            scope: Some(mcode_core::transcript::SHELL_SCOPE.into()),
+        }));
+        // 参数直填（无流式过程）：Bash(cmd) 头行立刻可见
+        let _ = h.ui_tx.send(UiEvent::Agent(AgentEvent::ToolInputDelta {
+            id,
+            partial_json: serde_json::json!({ "command": cmd }).to_string(),
+            scope: Some(mcode_core::transcript::SHELL_SCOPE.into()),
+        }));
+        let ui_tx = h.ui_tx.clone();
+        let cwd = Arc::new(self.cwd.clone());
+        self.rt.spawn(async move {
+            let mut command = if cfg!(windows) {
+                let mut c = tokio::process::Command::new("cmd");
+                c.arg("/C").arg(&cmd);
+                c
+            } else {
+                let mut c = tokio::process::Command::new("sh");
+                c.arg("-c").arg(&cmd);
+                c
+            };
+            command.current_dir(cwd.as_path());
+            let _ = mcode_core::util::hide_console_window(&mut command);
+            let (success, output) = match command.output().await {
+                Ok(o) => {
+                    let mut text = String::from_utf8_lossy(&o.stdout).to_string();
+                    let err = String::from_utf8_lossy(&o.stderr);
+                    if !err.trim().is_empty() {
+                        if !text.is_empty() && !text.ends_with('\n') {
+                            text.push('\n');
+                        }
+                        text.push_str(&err);
+                    }
+                    (o.status.success(), text)
+                }
+                Err(e) => (false, format!("启动失败：{e}")),
+            };
+            let _ = ui_tx.send(UiEvent::Agent(AgentEvent::ToolResult {
+                name: "bash".into(),
+                success,
+                output,
+                display: None,
+                scope: Some(mcode_core::transcript::SHELL_SCOPE.into()),
+            }));
+        });
+        cx.notify();
+    }
+
+    /// 启动一次模型回合：@ 引用展开 → transcript 占位 → spawn run_agent_turn
     ///（会话落盘在 harness 装配时已就绪，用户/助手消息由回合任务与 runner 落盘）
     fn launch_turn(&mut self, text: String, cx: &mut Context<Self>) {
         let mut turn_input = text.clone();
@@ -421,30 +546,23 @@ impl App {
             let r = expand_file_refs(&text, &self.cwd, multimodal);
             if !r.injected.is_empty() {
                 self.push_notice(
-                    format!(
-                        "📎 已注入 {} 个 @ 引用（文件内容/目录列表）",
-                        r.injected.len()
-                    ),
-                    false,
+                    format!("已注入 {} 个 @ 引用（文件内容/目录列表）", r.injected.len()),
+                    NoticeKind::Info,
                 );
             }
             if !r.missing.is_empty() {
-                self.push_notice(format!("⚠ 引用未解析：{}", r.missing.join("、")), true);
+                self.push_notice(
+                    format!("引用未解析：{}", r.missing.join("、")),
+                    NoticeKind::Warning,
+                );
             }
             attachments = r.attachments;
             turn_input = r.text;
         }
 
-        // -- UI 消息：User（带 @ 引用 chips）+ Running 占位 --
-        let refs: Vec<SharedString> = extract_refs(&text)
-            .into_iter()
-            .map(SharedString::from)
-            .collect();
-        self.messages.push(ChatMsg::User {
-            text: text.into(),
-            refs,
-        });
-        self.messages.push(ChatMsg::Running);
+        // -- CLI 提交次序：begin_turn 先于 push_user（用户块即冻结，之后是动态区）--
+        self.transcript.begin_turn();
+        self.transcript.push_user(&text);
         self.running = true;
         self.start_turn(turn_input, attachments, cx);
         cx.notify();
@@ -461,10 +579,10 @@ impl App {
     ) {
         let Some(h) = self.harness.clone() else {
             self.running = false;
-            self.pop_running();
+            self.transcript.end_turn();
             self.push_notice(
-                "未初始化完成，无法启动回合（cmd-, 打开设置）".to_string(),
-                true,
+                "未初始化完成，无法启动回合（⌘, 打开设置）",
+                NoticeKind::Error,
             );
             cx.notify();
             return;
@@ -580,21 +698,21 @@ impl App {
         }
         let goal = self.goal.clone().unwrap_or_default();
         if done {
-            self.push_notice("🎯 goal 已达成".to_string(), false);
+            self.push_notice("goal 已达成", NoticeKind::Success);
             self.goal = None;
             self.goal_rounds = 0;
             self.finish_run(cx);
         } else if self.goal_rounds >= MAX_GOAL_ROUNDS {
             self.push_notice(
-                format!("🎯 goal 已达 {MAX_GOAL_ROUNDS} 轮上限，循环终止"),
-                true,
+                format!("goal 已达 {MAX_GOAL_ROUNDS} 轮上限，循环终止"),
+                NoticeKind::Warning,
             );
             self.goal = None;
             self.goal_rounds = 0;
             self.finish_run(cx);
         } else {
             self.goal_rounds += 1;
-            self.push_notice(format!("🎯 goal 第 {} 轮", self.goal_rounds), false);
+            self.push_notice(format!("goal 第 {} 轮", self.goal_rounds), NoticeKind::Info);
             let prompt = build_goal_prompt(&goal);
             self.start_turn(prompt, vec![], cx);
         }
@@ -618,206 +736,25 @@ impl App {
         cx.notify();
     }
 
+    /// 事件 → transcript 状态机（唯一事实源）；UI 只补三层旁路：
+    /// Usage 累计、Done 的 goal 循环推进、Error 的防御性收尾。
     pub(crate) fn on_agent_event(&mut self, ev: AgentEvent, cx: &mut Context<Self>) {
+        if let AgentEvent::Usage(u) = &ev {
+            self.tokens_total += u.input_tokens + u.output_tokens;
+        }
+        self.transcript.apply(ev.clone());
         match ev {
-            // 文本增量：Running 占位 → Assistant 起步；已有 Assistant 则续写
-            AgentEvent::TextDelta(t) => {
-                if let Some(last) = self.messages.last_mut() {
-                    match last {
-                        ChatMsg::Running => {
-                            *last = ChatMsg::Assistant {
-                                text: t.into(),
-                                fold: FoldState::Expanded,
-                            };
-                        }
-                        ChatMsg::Assistant { text, .. } => *text = format!("{text}{t}").into(),
-                        _ => self.messages.push(ChatMsg::Assistant {
-                            text: t.into(),
-                            fold: FoldState::Expanded,
-                        }),
-                    }
-                } else {
-                    self.messages.push(ChatMsg::Assistant {
-                        text: t.into(),
-                        fold: FoldState::Expanded,
-                    });
-                }
-            }
-            // 思考增量：连续 Thinking 合并进最后一个思考块（保留其展开状态）；
-            // 新块按全局偏好初始化；流式期间滚动跟随到底部（scoped 事件同形，仅
-            // 任务面板归档，主消息流忽略 scope 归属差异）
-            AgentEvent::Thinking { text, .. } => {
-                if let Some(ChatMsg::Thinking { text: t, .. }) = self.messages.last_mut() {
-                    *t = format!("{t}{text}").into();
-                } else {
-                    self.messages.push(ChatMsg::Thinking {
-                        text: text.into(),
-                        fold: if self.thinking_default_expanded {
-                            FoldState::Expanded
-                        } else {
-                            FoldState::Collapsed
-                        },
-                    });
-                }
-                // 流式贴底仅在展开态跟随（用户切走折叠后不打扰滚动位置）
-                if self.messages.last().is_some_and(|m| {
-                    matches!(
-                        m,
-                        ChatMsg::Thinking {
-                            fold: FoldState::Expanded,
-                            ..
-                        }
-                    )
-                }) {
-                    self.thinking_scroll.scroll_to_bottom();
-                }
-                cx.notify();
-            }
-            AgentEvent::Retrying {
-                attempt,
-                max,
-                reason,
-            } => {
-                self.push_notice(format!("↻ 流式重试 {attempt}/{max}：{reason}"), false);
-            }
-            AgentEvent::Recovering { action } => {
-                self.push_notice(format!("↺ {action}"), false);
-            }
-            AgentEvent::HookNotice { message } => {
-                self.push_notice(format!("🪝 {message}"), true);
-            }
-            // 工具卡起步：push 卡片（参数随流式增量填充，结果按“最后一个同名 running 卡”回填）
-            AgentEvent::ToolUseStart { name, .. } => {
-                self.messages.push(ChatMsg::ToolCard {
-                    name: name.into(),
-                    args: "".into(),
-                    summary: "".into(),
-                    running: true,
-                    success: false,
-                });
-            }
-            // 工具参数流式增量：更新最后一个同名 running 卡的参数预览。
-            // partial_json 各后端口径不一（Anthropic 累积 / chat 分片），预览
-            // 只取最新一段展示即可，不做累积拼装。
-            AgentEvent::ToolInputDelta {
-                partial_json,
-                scope: None,
-                ..
-            } => {
-                if let Some(ChatMsg::ToolCard { args, .. }) = self
-                    .messages
-                    .iter_mut()
-                    .rev()
-                    .find(|m| matches!(m, ChatMsg::ToolCard { running: true, .. }))
-                {
-                    *args = trunc(&partial_json, 200).into();
-                }
-            }
-            AgentEvent::ToolInputDelta { .. } => {}
-            // 工具卡收尾：回填状态 + display 块展开为 Diff/Notice 消息
-            AgentEvent::ToolResult {
-                name,
-                success,
-                output,
-                display,
-                ..
-            } => {
-                let summary = trunc(&output, 60);
-                if let Some(ChatMsg::ToolCard {
-                    summary: s,
-                    running,
-                    success: ok,
-                    ..
-                }) = self
-                    .messages
-                    .iter_mut()
-                    .rev()
-                    .find(|m| matches!(m, ChatMsg::ToolCard { name: n, running: true, .. } if n.as_ref() == name.as_str()))
-                {
-                    {
-                        *s = summary.into();
-                        *running = false;
-                        *ok = success;
-                    }
-                }
-                match display {
-                    Some(DisplayBlock::Diff { path, lines }) => {
-                        let mapped = lines
-                            .iter()
-                            .map(|l| DiffLine {
-                                add: l.kind == mcode_core::tools::DiffKind::Add,
-                                del: l.kind == mcode_core::tools::DiffKind::Delete,
-                                hunk: l.kind == mcode_core::tools::DiffKind::Hunk,
-                                text: l.text.clone().into(),
-                            })
-                            .collect();
-                        self.messages.push(ChatMsg::Diff {
-                            path: path.into(),
-                            lines: mapped,
-                        });
-                    }
-                    Some(DisplayBlock::Output {
-                        stdout,
-                        stderr,
-                        code,
-                    }) => {
-                        let mut text = stdout;
-                        if !stderr.is_empty() {
-                            if !text.is_empty() {
-                                text.push('\n');
-                            }
-                            text.push_str(&stderr);
-                        }
-                        if !text.trim().is_empty() {
-                            self.push_notice(
-                                format!("▸ {name} · exit {code}\n{}", trunc(text.trim(), 400)),
-                                false,
-                            );
-                        }
-                    }
-                    Some(DisplayBlock::FileRef { path, lines }) if !lines.trim().is_empty() => {
-                        self.push_notice(format!("📄 {path}\n{}", trunc(lines.trim(), 400)), false);
-                    }
-                    Some(DisplayBlock::FileRef { .. }) | None => {}
-                }
-            }
-            // 用量累计（会话元数据由内核落盘，UI 只做展示累计）
-            AgentEvent::Usage(u) => {
-                self.tokens_total += u.input_tokens + u.output_tokens;
-            }
-            AgentEvent::Compacted { note } => {
-                self.push_notice(format!("🗜 已压缩历史：{note}"), false);
-            }
-            // 权限确认走专用 Confirm 通道（UiEvent::Confirm），事件流里的同名声
-            // 明不重复弹窗
-            AgentEvent::Confirm { .. } => {}
             // 回合收尾：goal 激活时优先推进 goal 循环（queue 等 goal 结束再消化）。
             // running=false 时收到的 Done 是被放弃/已超时的陈旧回合，忽略以防污染当前状态。
             AgentEvent::Done { reply } => {
                 if !self.running {
-                    cx.notify();
                     return;
-                }
-                if !reply.is_empty()
-                    && !matches!(self.messages.last(), Some(ChatMsg::Assistant { .. }))
-                {
-                    self.messages.push(ChatMsg::Assistant {
-                        text: reply.clone().into(),
-                        fold: default_fold_for(&reply),
-                    });
-                }
-                // 流式文本最终定型的默认折叠（30 行规则）；用户点击后 Done 紧随其到的场景极少
-                if let Some(ChatMsg::Assistant { fold, .. }) = self.messages.last_mut() {
-                    *fold = default_fold_for(&reply);
                 }
                 if self.goal.is_some() && !reply.is_empty() {
                     self.spawn_goal_check();
                 } else {
                     if self.goal.is_some() {
-                        self.push_notice(
-                            "🎯 goal 循环已终止（回合被打断或出错）".to_string(),
-                            false,
-                        );
+                        self.push_notice("goal 循环已终止（回合被打断或出错）", NoticeKind::Info);
                         self.goal = None;
                         self.goal_rounds = 0;
                     }
@@ -825,37 +762,27 @@ impl App {
                 }
                 self.refresh_ctx();
             }
-            AgentEvent::Error { message } => {
-                self.push_notice(format!("✗ {message}"), true);
-                // 陈旧回合的错误（新回合已启动）不能收尾当前回合
-                if self.running {
-                    self.finish_run(cx);
-                }
+            // 错误已由 transcript.apply 落为 Error notice。runner 契约是
+            // Error 后必有 Done（空回复）收口；但锁超时等防御路径可能成对
+            // 发 Error+Done——Done 到达时 running 已 false 会被陈旧门忽略，
+            // 此处先防御性收尾，避免错误回合挂着不放行队列。
+            AgentEvent::Error { .. } if self.running => {
+                self.transcript.end_turn();
+                self.finish_run(cx);
             }
+            _ => {}
         }
     }
 
     // ---------- 回合收尾 / 队列 / 打断 / 权限 ----------
 
-    /// 回合收尾：移除 Running 占位，队列非空则出队启动下一轮
+    /// 回合收尾：复位状态，队列非空则出队并按输入类别再解释（/ 与 ! 出队时
+    /// 才本地消化，不进模型回合——CLI 队列 (display, payload) 的 UI 对应）。
     fn finish_run(&mut self, cx: &mut Context<Self>) {
-        self.pop_running();
         self.running = false;
         if let Some(next) = self.queue.first().cloned() {
             self.queue.remove(0);
-            self.launch_turn(next, cx);
-        }
-    }
-
-    fn pop_running(&mut self) {
-        // 从尾部扫描移除 Running 占位——不能假设它是最后一条
-        // （错误 Notice / 模型切换 Notice 会插在它后面，曾致"运行中"永久滞留）
-        if let Some(idx) = self
-            .messages
-            .iter()
-            .rposition(|m| matches!(m, ChatMsg::Running))
-        {
-            self.messages.remove(idx);
+            self.dispatch_input(next, cx);
         }
     }
 
@@ -893,10 +820,12 @@ impl App {
             if let Some(h) = &self.harness {
                 let _ = h.deps.cancel_tx.send(true);
             }
-            // 不做"乐观收尾"：若在此处提前 finish_run，用户立刻再发消息会触发
-            // start_turn 把 cancel 复位为 false，旧任务可能还没观察到 cancel=true，
-            // 从此永远错过打断信号并持 conv 锁挂死（实测复现的"ESC 后再输入无响应"）。
+            // transcript 打中断标记（Interrupted 块可见反馈）。不做"乐观收尾"：
+            // 若在此处提前 finish_run，用户立刻再发消息会触发 start_turn 把
+            // cancel 复位为 false，旧任务可能还没观察到 cancel=true，从此永远
+            // 错过打断信号并持 conv 锁挂死（实测复现的"ESC 后再输入无响应"）。
             // Done(空回复)/Error 事件会随后到达并调用 finish_run 正常收尾。
+            self.transcript.interrupt_current();
             return;
         }
         if self.view != View::Chat {
@@ -904,13 +833,9 @@ impl App {
         }
     }
 
-    /// 消息折叠三态循环（Assistant/Thinking 头部行点击）
-    pub(crate) fn cycle_message_fold(&mut self, idx: usize) {
-        if let Some(ChatMsg::Assistant { fold, .. } | ChatMsg::Thinking { fold, .. }) =
-            self.messages.get_mut(idx)
-        {
-            *fold = fold.next();
-        }
+    /// 明细视图切换（ctrl+o）：CLI detail_view 同款——思考/工具内部行展开收起
+    pub(crate) fn toggle_detail(&mut self) {
+        self.transcript.detail_view = !self.transcript.detail_view;
     }
 
     /// 权限弹窗裁决：respond oneshot 回传 runner（AllowAlways 的沉淀在 runner 内）
@@ -934,7 +859,8 @@ impl App {
                     .into_iter()
                     .map(|c| Candidate {
                         name: c.name.into(),
-                        desc: c.desc.into(),
+                        // CLI 口径：补全提示 =「用法 — 作用」
+                        desc: format!("{} — {}", c.usage, c.desc),
                         is_dir: false,
                     })
                     .chain(slash_skill_candidates(&self.ext_skills, &q))

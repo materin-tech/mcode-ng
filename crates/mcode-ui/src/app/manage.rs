@@ -14,6 +14,7 @@ use crate::app::{App, Dialog, InstallKind, RemoveAction};
 use crate::views::text_input::TextInput;
 use gpui::Entity;
 use mcode_core::config::Provider;
+use mcode_core::transcript::NoticeKind;
 
 impl App {
     // ---------- 扩展页缓存 ----------
@@ -140,7 +141,7 @@ impl App {
         let models = Self::csv(&models.read(cx).text());
         let mm = Self::csv(&mm.read(cx).text());
         if name.is_empty() || url.is_empty() || models.is_empty() {
-            self.push_notice("✗ 名称 / baseURL / 模型列表不能为空".into(), true);
+            self.push_notice("名称 / baseURL / 模型列表不能为空", NoticeKind::Error);
             return;
         }
         let p = Provider {
@@ -164,12 +165,12 @@ impl App {
                 self.cfg.set_active_provider(&name).ok();
             }
         } else if let Err(e) = self.cfg.add_provider(p) {
-            self.push_notice(format!("✗ {e:#}"), true);
+            self.push_notice(format!("{e:#}"), NoticeKind::Error);
             return;
         }
         self.dialog = None;
         self.save_cfg_and_rebuild(cx);
-        self.push_notice(format!("✓ 供应商 `{name}` 已保存"), false);
+        self.push_notice(format!("供应商 `{name}` 已保存"), NoticeKind::Success);
     }
 }
 
@@ -182,16 +183,19 @@ impl App {
         let desc = desc.read(cx).text().trim().to_string();
         let prompt = prompt.read(cx).text().trim().to_string();
         if name.is_empty() || desc.is_empty() || prompt.is_empty() {
-            self.push_notice("✗ 名称 / 描述 / system prompt 不能为空".into(), true);
+            self.push_notice("名称 / 描述 / system prompt 不能为空", NoticeKind::Error);
             return;
         }
         match create_agent(&name, &desc, &prompt, None, None) {
             Ok(p) => {
                 self.dialog = None;
                 self.refresh_extensions();
-                self.push_notice(format!("✓ agent `{name}` 已创建：{}", p.display()), false);
+                self.push_notice(
+                    format!("agent `{name}` 已创建：{}", p.display()),
+                    NoticeKind::Success,
+                );
             }
-            Err(e) => self.push_notice(format!("✗ {e:#}"), true),
+            Err(e) => self.push_notice(format!("{e:#}"), NoticeKind::Error),
         }
     }
 
@@ -202,7 +206,7 @@ impl App {
         let name = name.read(cx).text().trim().to_string();
         let desc = desc.read(cx).text().trim().to_string();
         if name.is_empty() || desc.is_empty() {
-            self.push_notice("✗ 名称 / 描述不能为空".into(), true);
+            self.push_notice("名称 / 描述不能为空", NoticeKind::Error);
             return;
         }
         let body = format!("# {name}\n\n待补充：逐步披露的完整指令内容。");
@@ -211,11 +215,11 @@ impl App {
                 self.dialog = None;
                 self.refresh_extensions();
                 self.push_notice(
-                    format!("✓ 技能 `{name}` 已创建（项目级）：{}", p.display()),
-                    false,
+                    format!("技能 `{name}` 已创建（项目级）：{}", p.display()),
+                    NoticeKind::Success,
                 );
             }
-            Err(e) => self.push_notice(format!("✗ {e:#}"), true),
+            Err(e) => self.push_notice(format!("{e:#}"), NoticeKind::Error),
         }
     }
 
@@ -225,7 +229,7 @@ impl App {
         };
         let path = path.read(cx).text().trim().to_string();
         if path.is_empty() {
-            self.push_notice("✗ 路径不能为空".into(), true);
+            self.push_notice("路径不能为空", NoticeKind::Error);
             return;
         }
         let src = std::path::PathBuf::from(shellexpand(&path));
@@ -244,9 +248,9 @@ impl App {
             Ok(msg) => {
                 self.dialog = None;
                 self.refresh_extensions();
-                self.push_notice(msg, false);
+                self.push_notice(msg, NoticeKind::Info);
             }
-            Err(e) => self.push_notice(format!("✗ {e:#}"), true),
+            Err(e) => self.push_notice(format!("{e:#}"), NoticeKind::Error),
         }
     }
 
@@ -258,7 +262,7 @@ impl App {
         let command = command.read(cx).text().trim().to_string();
         let mut parts = command.split_whitespace();
         let Some(cmd) = parts.next().map(|s| s.to_string()) else {
-            self.push_notice("✗ command 不能为空".into(), true);
+            self.push_notice("command 不能为空", NoticeKind::Error);
             return;
         };
         let mut desktop = mcode_core::config::DesktopConfig::load().unwrap_or_default();
@@ -272,12 +276,15 @@ impl App {
             enabled: true,
         });
         if let Err(e) = desktop.save() {
-            self.push_notice(format!("✗ 保存 desktop.json 失败：{e:#}"), true);
+            self.push_notice(format!("保存 desktop.json 失败：{e:#}"), NoticeKind::Error);
             return;
         }
         self.dialog = None;
         self.rebuild_harness(cx);
-        self.push_notice(format!("✓ MCP server `{name}` 已写入（已重建连接）"), false);
+        self.push_notice(
+            format!("MCP server `{name}` 已写入（已重建连接）"),
+            NoticeKind::Success,
+        );
     }
 
     pub fn dialog_confirm_remove(&mut self, cx: &mut gpui::Context<Self>) {
@@ -324,8 +331,8 @@ impl App {
             }
         };
         match msg {
-            Ok(m) => self.push_notice(m, false),
-            Err(e) => self.push_notice(format!("✗ {e:#}"), true),
+            Ok(m) => self.push_notice(m, NoticeKind::Info),
+            Err(e) => self.push_notice(format!("{e:#}"), NoticeKind::Error),
         }
     }
 }

@@ -18,6 +18,7 @@ use crate::app::msg::trunc;
 use crate::app::{App, View};
 use crate::views::file_explorer::scan_file_tree;
 use crate::views::theme::*;
+use mcode_core::transcript::NoticeKind;
 
 /// 读取最近工作区（desktop.json 为空时用历史会话目录做种子）
 pub(crate) fn load_recents() -> Vec<String> {
@@ -75,7 +76,7 @@ impl App {
     /// 进入工作区：cwd → recent → 清会话态 → 重扫 file_tree → rebuild harness → 刷侧栏 → Chat
     pub(crate) fn enter_workspace(&mut self, path: PathBuf, cx: &mut gpui::Context<Self>) {
         if !path.is_dir() {
-            self.push_notice(format!("✗ 不是目录：{}", path.display()), true);
+            self.push_notice(format!("不是目录：{}", path.display()), NoticeKind::Error);
             cx.notify();
             return;
         }
@@ -96,7 +97,7 @@ impl App {
         self.view = View::Chat;
         self.push_notice(
             format!("📂 工作区：{}", trunc(&self.cwd.to_string_lossy(), 60)),
-            false,
+            NoticeKind::Info,
         );
         cx.notify();
     }
@@ -121,7 +122,7 @@ impl App {
                         }
                     }
                     Ok(Ok(None)) => {} // 用户取消，不动当前状态
-                    Ok(Err(e)) => a.push_notice(format!("✗ 目录选择失败：{e:#}"), true),
+                    Ok(Err(e)) => a.push_notice(format!("目录选择失败：{e:#}"), NoticeKind::Error),
                     Err(_) => {}
                 }
                 cx.notify();
@@ -140,7 +141,7 @@ impl App {
         };
         let p = PathBuf::from(expanded);
         if raw.is_empty() || !p.is_dir() {
-            self.push_notice(format!("✗ 目录不存在：{raw}"), true);
+            self.push_notice(format!("目录不存在：{raw}"), NoticeKind::Error);
             cx.notify();
             return;
         }

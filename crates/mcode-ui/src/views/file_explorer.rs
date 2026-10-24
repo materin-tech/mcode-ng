@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use crate::app::App;
 use crate::app::msg::trunc;
 use crate::views::theme::*;
+use mcode_core::transcript::NoticeKind;
 
 actions!(
     explorer,
@@ -188,11 +189,11 @@ impl App {
 
     pub(crate) fn fs_paste(&mut self) {
         let Some((src, cut)) = self.fs_clipboard.clone() else {
-            self.push_notice("文件剪贴板为空".to_string(), true);
+            self.push_notice("文件剪贴板为空", NoticeKind::Info);
             return;
         };
         let Some(src_ok) = self.ws_ok(&src) else {
-            self.push_notice("✗ 剪贴板路径已不在工作区内".to_string(), true);
+            self.push_notice("剪贴板路径已不在工作区内", NoticeKind::Error);
             self.fs_clipboard = None;
             return;
         };
@@ -214,8 +215,8 @@ impl App {
         match result {
             Ok(_) => {
                 self.push_notice(
-                    format!("✓ {} → {}", src_ok.display(), dest.display()),
-                    false,
+                    format!("{} → {}", src_ok.display(), dest.display()),
+                    NoticeKind::Success,
                 );
                 if cut {
                     self.fs_clipboard = None;
@@ -224,7 +225,7 @@ impl App {
                     }
                 }
             }
-            Err(e) => self.push_notice(format!("✗ 粘贴失败：{e}"), true),
+            Err(e) => self.push_notice(format!("粘贴失败：{e}"), NoticeKind::Error),
         }
         self.fs_refresh();
     }
@@ -239,10 +240,10 @@ impl App {
                         if cut { "✂" } else { "📄" },
                         p.display()
                     ),
-                    false,
+                    NoticeKind::Info,
                 );
             }
-            None => self.push_notice("未选中文件".to_string(), true),
+            None => self.push_notice("未选中文件", NoticeKind::Info),
         }
     }
 
@@ -259,9 +260,9 @@ impl App {
         match r {
             Ok(_) => {
                 self.fs_selected = Some(target);
-                self.push_notice(format!("✓ 已创建 {}", name), false);
+                self.push_notice(format!("已创建 {}", name), NoticeKind::Success);
             }
-            Err(e) => self.push_notice(format!("✗ 创建失败：{e}"), true),
+            Err(e) => self.push_notice(format!("创建失败：{e}"), NoticeKind::Error),
         }
         self.fs_refresh();
     }
@@ -269,21 +270,21 @@ impl App {
     /// 删除：第一次点击武装（Notice 提示），同一路径再点一次执行
     pub(crate) fn fs_delete(&mut self) {
         let Some(p) = self.fs_selected.clone() else {
-            self.push_notice("未选中文件".to_string(), true);
+            self.push_notice("未选中文件", NoticeKind::Info);
             return;
         };
         if self.ws_ok(&p).is_none() {
-            self.push_notice("✗ 路径不在工作区内".to_string(), true);
+            self.push_notice("路径不在工作区内", NoticeKind::Error);
             return;
         }
         if self.fs_delete_armed.as_ref() != Some(&p) {
             self.fs_delete_armed = Some(p.clone());
             self.push_notice(
                 format!(
-                    "⚠ 将删除 {}（目录将递归删除）——再次点击删除按钮确认",
+                    "将删除 {}（目录将递归删除）——再次点击删除按钮确认",
                     p.display()
                 ),
-                true,
+                NoticeKind::Warning,
             );
             return;
         }
@@ -293,8 +294,8 @@ impl App {
             std::fs::remove_file(&p)
         };
         match r {
-            Ok(_) => self.push_notice(format!("✓ 已删除 {}", p.display()), false),
-            Err(e) => self.push_notice(format!("✗ 删除失败：{e}"), true),
+            Ok(_) => self.push_notice(format!("已删除 {}", p.display()), NoticeKind::Success),
+            Err(e) => self.push_notice(format!("删除失败：{e}"), NoticeKind::Error),
         }
         // 清理已删目录的展开状态（含子孙路径）——残留会让同名新建目录继承陈旧展开态
         self.expanded_dirs
@@ -352,22 +353,22 @@ impl App {
     pub(crate) fn fs_rename(&mut self, target: &Path, new_name: &str) {
         let new_name = new_name.trim();
         if new_name.is_empty() || new_name.contains('/') || new_name == "." || new_name == ".." {
-            self.push_notice("✗ 名称不能为空、包含 / 或为路径符号".to_string(), true);
+            self.push_notice("名称不能为空、包含 / 或为路径符号", NoticeKind::Error);
             return;
         }
         let Some(dir) = target.parent() else { return };
         let dest = dir.join(new_name);
         if dest.exists() {
-            self.push_notice(format!("✗ 名称已被占用：{new_name}"), true);
+            self.push_notice(format!("名称已被占用：{new_name}"), NoticeKind::Error);
             return;
         }
         if self.ws_ok(&dest).is_none() || self.ws_ok(target).is_none() {
-            self.push_notice("✗ 路径不在工作区内".to_string(), true);
+            self.push_notice("路径不在工作区内", NoticeKind::Error);
             return;
         }
         match std::fs::rename(target, &dest) {
             Ok(_) => {
-                self.push_notice(format!("✓ 已重命名 → {new_name}"), false);
+                self.push_notice(format!("已重命名 → {new_name}"), NoticeKind::Success);
                 if self.fs_selected.as_ref() == Some(&target.to_path_buf()) {
                     self.fs_selected = Some(dest.clone());
                 }
@@ -386,7 +387,7 @@ impl App {
                     })
                     .collect();
             }
-            Err(e) => self.push_notice(format!("✗ 重命名失败：{e}"), true),
+            Err(e) => self.push_notice(format!("重命名失败：{e}"), NoticeKind::Error),
         }
         self.fs_refresh();
     }
