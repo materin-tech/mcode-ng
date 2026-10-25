@@ -315,7 +315,7 @@ impl Platform for WindowsPlatform {
                 // Standard Win32 loop: the IME claims keys via ImmProcessKey inside TranslateMessage.
                 // Calling it only after dispatch with a fabricated MSG cannot drive TSF IMEs
                 // (e.g. Sogou) to start composing — composition never reaches the app.
-                TranslateMessage(&msg);
+                let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
         }

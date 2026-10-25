@@ -375,7 +375,7 @@ impl WindowsWindowInner {
         // handler via WM_IME_COMPOSITION (GCS_*). The original key must NOT be restored and re-dispatched
         // to the app, or backspace/ESC during composition hit app bindings as raw keys (deleting committed
         // text; consuming the key so the IME can never cancel the composition).
-        if wparam == VK_PROCESSKEY {
+        if wparam.loword() == VK_PROCESSKEY.0 {
             return Some(0);
         }
         let mut lock = self.state.borrow_mut();
