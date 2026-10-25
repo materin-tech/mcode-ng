@@ -18,7 +18,7 @@ use crate::app::msg::trunc;
 use crate::app::{App, View};
 use crate::views::sidebar_view::{render_sidebar, render_sidebar_collapsed};
 use crate::views::theme::*;
-use crate::views::transcript_view::styled_line;
+use crate::views::transcript_view::{line_div, styled_line};
 
 /// 渲染分发：Onboarding / Settings / Extensions / Sessions / Chat
 pub(crate) fn render_app(app: &mut App, window: &mut Window, cx: &mut Context<App>) -> AnyElement {
@@ -90,7 +90,6 @@ fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> An
                 .iter()
                 .enumerate()
                 .map(|(j, l)| {
-                    let line_el = styled_line(l);
                     let clickable = matches!(b, Block::Thinking { .. }) && j == 0;
                     if clickable {
                         div()
@@ -101,10 +100,10 @@ fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> An
                                 this.toggle_detail();
                                 cx.notify();
                             }))
-                            .child(line_el)
+                            .child(line_div(l))
                             .into_any_element()
                     } else {
-                        div().child(line_el).into_any_element()
+                        line_div(l).into_any_element()
                     }
                 })
                 .collect();
@@ -187,7 +186,7 @@ fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> An
                 .child(
                     div()
                         .text_color(if sel { ACCENT } else { TEXT_1 })
-                        .font_family("Menlo")
+                        .font_family(MONO_FONT)
                         // 候选统一带 `/` 前缀展示（core 指令与技能同口径；insert 由 apply 拼回）
                         .child(format!("/{}", c.name)),
                 )
@@ -248,7 +247,7 @@ fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> An
                             .rounded_md()
                             .bg(BG_WINDOW)
                             .p_2()
-                            .font_family("Menlo")
+                            .font_family(MONO_FONT)
                             .text_size(px(11.5))
                             .text_color(TEXT_2)
                             .child(args),
@@ -380,7 +379,7 @@ fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> An
                         .border_1()
                         .border_color(BORDER)
                         .bg(BG_PANEL)
-                        .font_family("Menlo")
+                        .font_family(MONO_FONT)
                         .text_size(px(11.))
                         .text_color(TEXT_3)
                         .cursor_pointer()
@@ -501,6 +500,10 @@ fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> An
                                         ))
                                         .px_5()
                                         .py_3()
+                                        // 输出区终端帧复刻：等宽 + 13px 基准（⏺/⎿ 对齐、
+                                        // 管道表格列宽、代码缩进依赖等宽；与输入框同源）
+                                        .font_family(MONO_FONT)
+                                        .text_size(px(13.))
                                         .children(message_list),
                                 )
                                 .when(!app.chat_follow, |d| {

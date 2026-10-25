@@ -2,24 +2,16 @@
 //!
 //! 规则对齐 Claude Code utils/markdown.ts：
 //! - h1 bold+italic+underline；h2+ bold；块间 1 空行
-//! - codespan 紫（permission）；链接保文字
+//! - codespan 紫（permission）；链接保文字加下划线
 //! - blockquote 每行 `▎ ` dim 前缀 + italic 正文
 //! - 列表缩进 2×depth；有序序号按深度 1. → a. → i.
 //! - 表格管道风（列宽 max(3, 内容宽)，`-` 分隔行）；hr `---`
 //! - 删除线禁用（不开 STRIKETHROUGH，`~` 保持字面）
+//! - 行级语义（LineKind）：标题/代码块行打标，GUI 行容器按级提字号/上面板
 
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag};
 
-use super::style::{display_width, Color, Span, StyledLine};
-
-/// 流式渲染的稳定边界：在最后一个空行处切开。
-/// 返回 (稳定前缀, 增长尾部)；无空行时前缀为空。
-pub fn split_stable_stream(text: &str) -> (String, String) {
-    match text.rfind("\n\n") {
-        Some(i) => (text[..i].to_string(), text[i..].to_string()),
-        None => (String::new(), text.to_string()),
-    }
-}
+use super::style::{display_width, Color, LineKind, Span, StyledLine};
 
 /// 渲染整段 markdown 为样式行（行尾无多余空行）。
 pub fn render_markdown(text: &str) -> Vec<StyledLine> {
@@ -166,6 +158,7 @@ impl MdRenderer {
                             italic: level == HeadingLevel::H1,
                             underline: level == HeadingLevel::H1,
                         };
+                        self.cur.1 = LineKind::Heading(level as u8);
                     }
                     Tag::BlockQuote(_) => {
                         self.seal_line();
@@ -239,6 +232,8 @@ impl MdRenderer {
                     }
                     Tag::Emphasis => self.style.italic = true,
                     Tag::Strong => self.style.bold = true,
+                    // 链接文字加下划线（URL 不展示，CC 同口径）
+                    Tag::Link { .. } => self.style.underline = true,
                     _ => {}
                 },
                 Event::End(tag) => match tag {
@@ -295,14 +290,21 @@ impl MdRenderer {
                     }
                     pulldown_cmark::TagEnd::Emphasis => self.style.italic = false,
                     pulldown_cmark::TagEnd::Strong => self.style.bold = false,
+                    pulldown_cmark::TagEnd::Link => self.style.underline = false,
                     _ => {}
                 },
                 Event::Text(t) => {
                     if self.code_open {
                         for line in t.lines() {
                             self.start_line();
-                            self.push_span(line, None);
-                            self.seal_line();
+                            self.cur.1 = LineKind::Code;
+                            if line.is_empty() {
+                                // 块内空行保留（GUI 代码面板连续；CLI paint 为空串，视觉不变）
+                                self.lines.push(std::mem::take(&mut self.cur));
+                            } else {
+                                self.push_span(line, None);
+                                self.seal_line();
+                            }
                         }
                     } else if let Some(tb) = table.as_mut() {
                         if let Some(cell) = tb.cur_cell.as_mut() {
@@ -394,7 +396,7 @@ impl MdRenderer {
                 ]
             }))
             .collect();
-        self.lines.push(StyledLine(sep));
+        self.lines.push(StyledLine(sep, LineKind::Normal));
         for row in &t.rows[1..] {
             self.lines.push(render_row(row));
         }
@@ -564,6 +566,37 @@ mod tests {
     fn code_block_lines_verbatim() {
         let lines = render_markdown("```\nfn a() {}\nlet b = 1;\n```");
         assert_eq!(texts(&lines), vec!["fn a() {}", "let b = 1;"]);
+        assert!(
+            lines.iter().all(|l| l.1 == LineKind::Code),
+            "代码块行全部打 Code 标"
+        );
+    }
+
+    #[test]
+    fn code_block_keeps_inner_blank_lines_with_kind() {
+        let lines = render_markdown("```\na\n\nb\n```");
+        assert_eq!(texts(&lines), vec!["a", "", "b"], "块内空行不吞");
+        assert!(lines.iter().all(|l| l.1 == LineKind::Code));
+        assert_eq!(lines[1].0.len(), 0, "空行无 span");
+    }
+
+    #[test]
+    fn heading_lines_carry_level_kind() {
+        let lines = render_markdown("# 一\n\n## 二\n\n正文");
+        assert_eq!(lines[0].1, LineKind::Heading(1));
+        assert_eq!(lines[2].1, LineKind::Heading(2));
+        assert_eq!(lines[4].1, LineKind::Normal);
+    }
+
+    #[test]
+    fn link_text_gets_underline() {
+        let lines = render_markdown("见 [文档](https://example.com) 说明");
+        let body = lines[0]
+            .0
+            .iter()
+            .find(|s| s.text == "文档")
+            .expect("链接文字 span 存在");
+        assert!(body.underline, "链接文字带下划线（URL 不展示）");
     }
 
     #[test]
@@ -580,15 +613,5 @@ mod tests {
         );
         let tl = render_markdown("- [x] 完成\n- [ ] 待办");
         assert_eq!(texts(&tl), vec!["- [x] 完成", "- [ ] 待办"]);
-    }
-
-    #[test]
-    fn stream_split_at_last_blank_line() {
-        let (stable, tail) = split_stable_stream("第一段。\n\n第二段还在");
-        assert_eq!(stable, "第一段。");
-        assert_eq!(tail, "\n\n第二段还在");
-        let (stable, tail) = split_stable_stream("没有边界");
-        assert!(stable.is_empty());
-        assert_eq!(tail, "没有边界");
     }
 }

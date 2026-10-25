@@ -5,7 +5,7 @@
 //! renderToolResultMessage），未覆盖的工具走通用兜底。
 //! 事件流里没有工具耗时，耗时由块的墙钟计时补（见 blocks.rs）。
 
-use super::style::{truncate_chars, Color, Span, StyledLine};
+use super::style::{truncate_chars, Color, LineKind, Span, StyledLine};
 use crate::tools::DisplayBlock;
 
 /// 单行结果上限（普通模式），详情模式放开。
@@ -181,11 +181,14 @@ fn fallback_result_lines(
             let n = args_field(args_json, "content")
                 .map(|c| c.lines().count())
                 .unwrap_or(0);
-            let mut out = vec![StyledLine(vec![
-                Span::dim_text("Wrote "),
-                Span::new(n.to_string()).bold(),
-                Span::dim_text(format!(" line{} to {path}", if n == 1 { "" } else { "s" })),
-            ])];
+            let mut out = vec![StyledLine(
+                vec![
+                    Span::dim_text("Wrote "),
+                    Span::new(n.to_string()).bold(),
+                    Span::dim_text(format!(" line{} to {path}", if n == 1 { "" } else { "s" })),
+                ],
+                LineKind::Normal,
+            )];
             out.extend(write_preview_lines(args_json));
             out
         }
@@ -315,11 +318,14 @@ fn diff_stat_line(add: usize, del: usize) -> StyledLine {
 /// `Read 120 lines` / `Found 3 files`（数字 bold）。
 fn count_line(prefix: &str, n: usize, noun: &str) -> StyledLine {
     let plural = if n == 1 { "" } else { "s" };
-    StyledLine(vec![
-        Span::dim_text(format!("{prefix} ")),
-        Span::new(n.to_string()).bold(),
-        Span::dim_text(format!(" {noun}{plural}")),
-    ])
+    StyledLine(
+        vec![
+            Span::dim_text(format!("{prefix} ")),
+            Span::new(n.to_string()).bold(),
+            Span::dim_text(format!(" {noun}{plural}")),
+        ],
+        LineKind::Normal,
+    )
 }
 
 /// FileRef `lines: "start-end"` → 行数。

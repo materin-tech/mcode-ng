@@ -301,14 +301,14 @@ pub fn render_settings(app: &mut App, cx: &mut gpui::Context<App>) -> AnyElement
                             )
                             .child(
                                 div()
-                                    .font_family("Menlo")
+                                    .font_family(MONO_FONT)
                                     .text_size(px(11.))
                                     .text_color(TEXT_3)
                                     .child(meta),
                             )
                             .child(
                                 div()
-                                    .font_family("Menlo")
+                                    .font_family(MONO_FONT)
                                     .text_size(px(11.))
                                     .text_color(TEXT_3)
                                     .child(models),
@@ -359,7 +359,7 @@ pub fn render_settings(app: &mut App, cx: &mut gpui::Context<App>) -> AnyElement
                             .items_center()
                             .gap_2()
                             .text_size(px(12.))
-                            .font_family("Menlo")
+                            .font_family(MONO_FONT)
                             .text_color(if active { ACCENT } else { TEXT_1 })
                             .cursor_pointer()
                             .hover(|s| s.bg(BG_HOVER))
@@ -505,7 +505,7 @@ pub fn render_settings(app: &mut App, cx: &mut gpui::Context<App>) -> AnyElement
                             .rounded_sm()
                             .bg(BG_PANEL)
                             .text_size(px(11.5))
-                            .font_family("Menlo")
+                            .font_family(MONO_FONT)
                             .child(div().text_color(TEXT_1).child(r.tool.clone()))
                             .child(div().text_color(TEXT_3).child(r.pattern.clone()))
                             .child(
@@ -781,7 +781,7 @@ pub fn render_extensions(app: &mut App, cx: &mut gpui::Context<App>) -> AnyEleme
                         .child(div().text_size(px(12.5)).text_color(TEXT_1).child(name))
                         .child(
                             div()
-                                .font_family("Menlo")
+                                .font_family(MONO_FONT)
                                 .text_size(px(10.5))
                                 .text_color(TEXT_3)
                                 .child(meta),
@@ -885,7 +885,7 @@ pub fn render_extensions(app: &mut App, cx: &mut gpui::Context<App>) -> AnyEleme
                             .rounded_sm()
                             .bg(BG_PANEL)
                             .text_size(px(11.5))
-                            .font_family("Menlo")
+                            .font_family(MONO_FONT)
                             .child(div().text_color(PURPLE).child(event))
                             .child(div().text_color(TEXT_3).child(matcher))
                             .child(div().text_color(TEXT_2).child(command))

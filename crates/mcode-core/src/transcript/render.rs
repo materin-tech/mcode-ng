@@ -129,18 +129,11 @@ pub fn render_frozen(b: &Block, detail: bool, width: usize) -> Vec<StyledLine> {
     out
 }
 
-/// 流式正文：稳定前缀走 markdown，尾部（未定稿块）按纯文本 —— 已打印
-/// 内容视觉上不再回退，逼近 CC 的 stable-prefix 单调推进。
+/// 流式正文：整段走 markdown 渲染（每帧重算，纯函数无状态）。
+/// 未闭合语法由 pulldown 容错：`**bo` 原样显示、未闭合围栏其后按代码块呈现；
+/// 文本内容单调增长不回退，已定稿块的样式也随之稳定。
 fn render_streaming_assistant(text: &str, _width: usize) -> Vec<StyledLine> {
-    let (stable, tail) = markdown::split_stable_stream(text);
-    let mut body = markdown::render_markdown_trimmed(&stable);
-    if tail.len() > 2 {
-        let tail = tail.trim_start_matches('\n');
-        for l in tail.lines() {
-            body.push(StyledLine::plain(l));
-        }
-    }
-    prefix_dot(body, false)
+    prefix_dot(markdown::render_markdown_trimmed(text), false)
 }
 
 /// `⏺  ` 头 + 后续行 2 空格对齐。
@@ -158,6 +151,7 @@ fn prefix_dot(body: Vec<StyledLine>, dim_dot: bool) -> Vec<StyledLine> {
             line.push(Span::new("  "));
         }
         line.0.extend(l.0);
+        line.1 = l.1;
         out.push(line);
     }
     if out.is_empty() {

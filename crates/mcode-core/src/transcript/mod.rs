@@ -23,9 +23,10 @@ pub use blocks::{
     AgentState, Block, InternalLine, NoticeKind, StreamMode, ToolBlock, ToolStatus,
     TranscriptState, SHELL_SCOPE,
 };
-pub use markdown::{render_markdown, render_markdown_trimmed, split_stable_stream};
+pub use markdown::{render_markdown, render_markdown_trimmed};
 pub use render::render_block;
 pub use style::{
-    compact_tokens, display_width, format_duration, truncate_chars, Color, Span, StyledLine,
+    compact_tokens, display_width, format_duration, truncate_chars, Color, LineKind, Span,
+    StyledLine,
 };
 pub use tools::{tool_header, tool_result_lines, TodoItem};

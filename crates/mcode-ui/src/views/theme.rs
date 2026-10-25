@@ -43,6 +43,13 @@ pub const BG_ACTIVE: Rgba = Rgba {
     b: 59. / 255.,
     a: 1.,
 };
+/// 代码块行面板底（比 BG_MAIN 亮一档，markdown LineKind::Code 专用）
+pub const BG_CODE: Rgba = Rgba {
+    r: 40. / 255.,
+    g: 40. / 255.,
+    b: 47. / 255.,
+    a: 1.,
+};
 pub const BORDER: Rgba = Rgba {
     r: 46. / 255.,
     g: 46. / 255.,
@@ -120,3 +127,13 @@ pub fn mode_color(m: mcode_core::permission::Mode) -> Rgba {
         Passon => RED,
     }
 }
+
+/// 输出区等宽字体：transcript 是 CLI 终端帧的窗口化复刻（⏺/⎿ 对齐、管道表格
+/// 列宽、代码缩进都依赖等宽）；输入框同源。按平台选系统自带等宽字体。
+pub const MONO_FONT: &str = if cfg!(target_os = "macos") {
+    "Menlo"
+} else if cfg!(target_os = "windows") {
+    "Consolas"
+} else {
+    "DejaVu Sans Mono"
+};

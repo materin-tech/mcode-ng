@@ -138,27 +138,38 @@ impl Span {
     }
 }
 
-/// 一行 = Span 序列。
+/// 行级语义（GUI 行容器样式用：标题提字号、代码块上面板；CLI 渲染忽略）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LineKind {
+    #[default]
+    Normal,
+    /// 标题行（级别 1-6）
+    Heading(u8),
+    /// 代码块行（含块内空行）
+    Code,
+}
+
+/// 一行 = Span 序列 + 行级语义。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct StyledLine(pub Vec<Span>);
+pub struct StyledLine(pub Vec<Span>, pub LineKind);
 
 impl From<Span> for StyledLine {
     fn from(s: Span) -> Self {
-        StyledLine(vec![s])
+        StyledLine(vec![s], LineKind::Normal)
     }
 }
 
 impl StyledLine {
     pub fn new(spans: Vec<Span>) -> Self {
-        StyledLine(spans)
+        StyledLine(spans, LineKind::Normal)
     }
 
     pub fn plain(text: impl Into<String>) -> Self {
-        StyledLine(vec![Span::new(text)])
+        StyledLine(vec![Span::new(text)], LineKind::Normal)
     }
 
     pub fn blank() -> Self {
-        StyledLine(vec![Span::new("")])
+        StyledLine(vec![Span::new("")], LineKind::Normal)
     }
 
     pub fn push(&mut self, s: Span) {
@@ -203,7 +214,7 @@ pub fn wrap_line(line: &StyledLine, width: usize) -> Vec<StyledLine> {
         for ch in span.text.chars() {
             let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
             if cur_w + w > width && cur_w > 0 {
-                out.push(StyledLine(std::mem::take(&mut cur)));
+                out.push(StyledLine(std::mem::take(&mut cur), line.1));
                 cur_w = 0;
             }
             match cur.last_mut() {
@@ -219,7 +230,7 @@ pub fn wrap_line(line: &StyledLine, width: usize) -> Vec<StyledLine> {
         }
     }
     if !cur.is_empty() || out.is_empty() {
-        out.push(StyledLine(cur));
+        out.push(StyledLine(cur, line.1));
     }
     out
 }
@@ -271,16 +282,26 @@ mod tests {
 
     #[test]
     fn wrap_preserves_styles_across_lines() {
-        let line = StyledLine(vec![
-            Span::new("aaaa"),
-            Span::colored(Color::Error, "bbbbb"),
-        ]);
+        let line = StyledLine(
+            vec![Span::new("aaaa"), Span::colored(Color::Error, "bbbbb")],
+            LineKind::Normal,
+        );
         let wrapped = wrap_line(&line, 6);
         assert_eq!(wrapped.len(), 2);
         assert_eq!(wrapped[0].text(), "aaaabb", "4a+2b 填满 6 列");
         assert_eq!(wrapped[1].text(), "bbb");
         assert_eq!(wrapped[0].0[1].color, Color::Error, "跨行保留颜色");
         assert_eq!(wrapped[1].0[0].color, Color::Error);
+    }
+
+    #[test]
+    fn wrap_preserves_line_kind() {
+        let line = StyledLine(vec![Span::new("fn main() {}")], LineKind::Code);
+        let wrapped = wrap_line(&line, 8);
+        assert!(
+            wrapped.iter().all(|l| l.1 == LineKind::Code),
+            "折行后仍标 Code"
+        );
     }
 
     #[test]

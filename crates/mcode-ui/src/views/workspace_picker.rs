@@ -207,7 +207,7 @@ pub fn render_workspace_picker(app: &mut App, cx: &mut gpui::Context<App>) -> An
                                 }))
                                 .child(div().text_size(px(11.5)).child("📁"))
                                 .child(
-                                    div().font_family("Menlo").text_size(px(11.5)).text_color(TEXT_2)
+                                    div().font_family(MONO_FONT).text_size(px(11.5)).text_color(TEXT_2)
                                         .child(SharedString::from(trunc(r, 64))),
                                 )
                         })),
