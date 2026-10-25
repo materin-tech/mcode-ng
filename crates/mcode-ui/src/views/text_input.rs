@@ -44,6 +44,13 @@ pub enum InputEvent {
 
 impl EventEmitter<InputEvent> for TextInput {}
 
+/// IME 诊断桩（MCODE_IME_TRACE=1 开启）：追输入法回调的真实调用序列与 entity 状态
+fn ime_trace(msg: impl std::fmt::Display) {
+    if std::env::var_os("MCODE_IME_TRACE").is_some() {
+        eprintln!("[ime] {msg}");
+    }
+}
+
 pub struct TextInput {
     pub focus_handle: FocusHandle,
     pub content: SharedString,
@@ -98,7 +105,7 @@ impl TextInput {
     /// （VK_PROCESSKEY）还原成原始键派发进应用，退格若不拦截会删掉已上屏内容
     /// 而不是让输入法纠正拼音；此时退格/删除/回车都应交给输入法。
     /// 与 marked_text_range 同口径：越界/倒挂的残留 marked 视为组词态已废。
-    fn is_composing(&self) -> bool {
+    pub(crate) fn is_composing(&self) -> bool {
         self.valid_marked().is_some()
     }
 
@@ -114,7 +121,9 @@ impl TextInput {
     }
 
     pub(crate) fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
+        self.trace_state("action backspace enter");
         if self.is_composing() {
+            ime_trace("action backspace GUARDED (composing)");
             return;
         }
         if self.selected_range.is_empty() {
@@ -124,7 +133,9 @@ impl TextInput {
     }
 
     pub(crate) fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
+        self.trace_state("action delete enter");
         if self.is_composing() {
+            ime_trace("action delete GUARDED (composing)");
             return;
         }
         if self.selected_range.is_empty() {
@@ -139,10 +150,20 @@ impl TextInput {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        ime_trace(format!(
+            "on_mouse_down at={:?} before: content={:?} sel={:?} marked={:?}",
+            event.position, self.content, self.selected_range, self.marked_range
+        ));
         self.is_selecting = true;
-        // 点击即结束组词：Windows IME 在鼠标点击后会自行取消组词，entity 侧
-        // 若仍挂 marked，键盘闸门会把后续按键导向已死的组词会话（假死）
-        self.marked_range = None;
+        // 仅 Windows 点击即结束组词：其 IME 在鼠标点击后会自行取消组词，entity
+        // 侧若仍挂 marked，键盘闸门会把后续按键导向已死的组词会话（假死）。
+        // macOS 绝不能代杀：组词会话在点击后仍活着，杀掉 marked 会让 entity 与
+        // IME 脱钩——后续退格被 IME 消费后按选区拼接/穿透到应用，已上屏汉字被
+        // 误删（搜狗实测）。macOS 组词生命周期完全由 IME 回调驱动
+        // （unmark_text/insert_text/set_marked_text），无需也无法代管。
+        if cfg!(windows) {
+            self.marked_range = None;
+        }
 
         if event.modifiers.shift {
             self.select_to(self.index_for_mouse_position(event.position), cx);
@@ -326,6 +347,13 @@ impl TextInput {
         self.last_bounds = None;
         self.is_selecting = false;
     }
+
+    fn trace_state(&self, tag: &str) {
+        ime_trace(format!(
+            "{tag}: content={:?} sel={:?} marked={:?}",
+            self.content, self.selected_range, self.marked_range
+        ));
+    }
 }
 
 impl EntityInputHandler for TextInput {
@@ -337,6 +365,7 @@ impl EntityInputHandler for TextInput {
         _cx: &mut Context<Self>,
     ) -> Option<String> {
         let range = self.range_from_utf16(&range_utf16);
+        ime_trace(format!("text_for_range utf16={range_utf16:?}"));
         // 防御性：utf16 映射的 range 理论上总在 content 边界内，但布局落后窗口期
         // 仍可能越界——切片改 get()，越界返回 None 而非 panic
         let text = self.content.get(range.clone()).map(|s| s.to_string());
@@ -366,10 +395,16 @@ impl EntityInputHandler for TextInput {
         // gpui Windows 后端的"组词中"闸门读本返回值：Some 则所有按键跳过
         // binding 派发、translate_message 交给 IME。失效残留在此降级 None
         // （键盘解闸自愈），口径与 is_composing 一致
-        self.valid_marked().map(|range| self.range_to_utf16(&range))
+        let result = self.valid_marked().map(|range| self.range_to_utf16(&range));
+        ime_trace(format!(
+            "marked_text_range -> {result:?} (raw={:?}) content={:?}",
+            self.marked_range, self.content
+        ));
+        result
     }
 
     fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        ime_trace("unmark_text");
         self.marked_range = None;
     }
 
@@ -380,6 +415,10 @@ impl EntityInputHandler for TextInput {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.trace_state("replace_text IN");
+        ime_trace(format!(
+            "replace_text range_utf16={range_utf16:?} new_text={new_text:?}"
+        ));
         let range = range_utf16
             .as_ref()
             .map(|range_utf16| self.range_from_utf16(range_utf16))
@@ -391,6 +430,7 @@ impl EntityInputHandler for TextInput {
                 .into();
         self.selected_range = range.start + new_text.len()..range.start + new_text.len();
         self.marked_range = None;
+        self.trace_state("replace_text OUT");
         // 键盘输入必经路径：同步补全状态机（/ 与 @ 触发）
         cx.emit(InputEvent::Changed(self.content.to_string()));
         cx.notify();
@@ -404,6 +444,10 @@ impl EntityInputHandler for TextInput {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.trace_state("replace_and_mark IN");
+        ime_trace(format!(
+            "replace_and_mark range_utf16={range_utf16:?} new_text={new_text:?} new_sel={new_selected_range_utf16:?}"
+        ));
         let range = range_utf16
             .as_ref()
             .map(|range_utf16| self.range_from_utf16(range_utf16))
@@ -433,6 +477,7 @@ impl EntityInputHandler for TextInput {
             })
             .unwrap_or_else(|| range.start + new_text.len()..range.start + new_text.len());
 
+        self.trace_state("replace_and_mark OUT");
         // 键盘输入必经路径：同步补全状态机（/ 与 @ 触发）
         cx.emit(InputEvent::Changed(self.content.to_string()));
         cx.notify();

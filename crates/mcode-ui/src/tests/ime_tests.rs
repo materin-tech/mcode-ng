@@ -92,7 +92,7 @@ fn ime_composition_updates_keep_selection_collapsed(cx: &mut TestAppContext) {
 
 /// 残留失效 marked（entity 与真实 IME 脱钩）必须自动降级解闸：gpui Windows
 /// 后端以 marked_text_range() 作"组词中"键盘闸门，废组词态不解闸会把方向键/
-/// 空格全数导向已不存在的组词会话（表现为按键没效果）。点击输入框同理要清。
+/// 空格全数导向已不存在的组词会话（表现为按键没效果）。
 #[gpui::test]
 fn ime_stale_marked_gate_self_heals(cx: &mut TestAppContext) {
     let window = make_input_window(cx);
@@ -108,9 +108,23 @@ fn ime_stale_marked_gate_self_heals(cx: &mut TestAppContext) {
             );
             input.backspace(&ti::Backspace, window, cx);
             assert_eq!(input.text(), "ab", "解闸后退格应恢复正常删除");
+        })
+        .unwrap();
+}
 
-            // 点击输入框即结束组词：entity 侧同步清 marked，防闸门滞留
-            input.replace_and_mark_text_in_range(None, "de", None, window, cx);
+/// 点击输入框与组词态的关系分平台：
+/// - Windows：点击即结束组词，entity 侧必须同步清 marked（否则键盘闸门把按键
+///   导向已死的组词会话，输入框假死）。
+/// - macOS：组词会话在点击后仍活着，entity 侧绝不能代杀 marked——脱钩后后续
+///   退格会被 IME 消费后按选区拼接/穿透到应用，已上屏汉字被误删（搜狗实测）。
+///   macOS 的组词生命周期完全由 IME 回调（unmark_text/insert_text）驱动。
+#[gpui::test]
+fn ime_mouse_down_marked_handling_is_platform_split(cx: &mut TestAppContext) {
+    let window = make_input_window(cx);
+    window
+        .update(cx, |input, window, cx| {
+            input.set_text("已上屏", cx);
+            input.replace_and_mark_text_in_range(None, "ni", None, window, cx);
             assert!(input.marked_range.is_some(), "前置：组词态应已挂上");
             input.on_mouse_down(
                 &gpui::MouseDownEvent {
@@ -123,7 +137,14 @@ fn ime_stale_marked_gate_self_heals(cx: &mut TestAppContext) {
                 window,
                 cx,
             );
-            assert!(input.marked_range.is_none(), "点击后组词态应清除");
+            if cfg!(windows) {
+                assert!(input.marked_range.is_none(), "Windows 点击后组词态应清除");
+            } else {
+                assert!(
+                    input.marked_range.is_some(),
+                    "macOS 点击后组词态必须保留（代杀 marked 会与 IME 脱钩，退格误删已上屏汉字）"
+                );
+            }
         })
         .unwrap();
 }

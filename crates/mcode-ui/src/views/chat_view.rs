@@ -295,16 +295,23 @@ fn render_chat(app: &mut App, _window: &mut Window, cx: &mut Context<App>) -> An
         .on_action(cx.listener(|this, _: &crate::app::PaletteUp, _, cx| {
             if this.completion.is_open() {
                 this.completion.move_up(this.candidates.len());
-            } else if let Some(t) = this.history_recall_up(&this.input.read(cx).text()) {
-                this.input.update(cx, |i, cx| i.set_text(&t, cx));
+            } else if !this.input.read(cx).is_composing() {
+                // 组词中 ↑ 可能被 IME 穿透过来：此时召回历史会 set_text 整体替换
+                // 内容并杀掉 marked，entity 与 IME 脱钩（后续退格误删已上屏汉字）
+                if let Some(t) = this.history_recall_up(&this.input.read(cx).text()) {
+                    this.input.update(cx, |i, cx| i.set_text(&t, cx));
+                }
             }
             cx.notify();
         }))
         .on_action(cx.listener(|this, _: &crate::app::PaletteDown, _, cx| {
             if this.completion.is_open() {
                 this.completion.move_down(this.candidates.len());
-            } else if let Some(t) = this.history_recall_down() {
-                this.input.update(cx, |i, cx| i.set_text(&t, cx));
+            } else if !this.input.read(cx).is_composing() {
+                // 同 PaletteUp：组词中不放行历史召回
+                if let Some(t) = this.history_recall_down() {
+                    this.input.update(cx, |i, cx| i.set_text(&t, cx));
+                }
             }
             cx.notify();
         }))
