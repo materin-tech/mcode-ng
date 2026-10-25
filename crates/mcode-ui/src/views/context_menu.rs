@@ -290,9 +290,20 @@ impl App {
                 }
             }
             CtxAction::Reveal => {
-                let mut cmd = build_reveal_command(path);
-                if let Err(e) = cmd.spawn() {
-                    self.push_notice(format!("无法打开文件管理器: {e}"), NoticeKind::Warning);
+                // status 而非 spawn：open -R 路径无效时退出非零但 spawn 成功，
+                // 不等退出码就是静默失败（Finder 不开、无提示）。explorer 例外
+                // ——成功也恒返 1，退出码无意义，只查进程能否启动。
+                match build_reveal_command(path).status() {
+                    Err(e) => {
+                        self.push_notice(format!("无法打开文件管理器: {e}"), NoticeKind::Warning);
+                    }
+                    Ok(st) if !st.success() && !cfg!(target_os = "windows") => {
+                        self.push_notice(
+                            "文件管理器定位失败：路径不存在或已变更".to_string(),
+                            NoticeKind::Warning,
+                        );
+                    }
+                    Ok(_) => {}
                 }
                 true
             }
@@ -544,15 +555,54 @@ fn action_debug_name(action: crate::views::context_menu::SessAction) -> &'static
     }
 }
 
-/// 在系统文件管理器中定位条目：macOS `open -R`（Finder 反显），Windows `explorer /select,`
-pub(crate) fn build_reveal_command(path: &Path) -> std::process::Command {
-    if cfg!(target_os = "windows") {
-        let mut c = std::process::Command::new("explorer");
-        c.arg(format!("/select,{}", path.display()));
-        c
+/// Reveal 用规范化路径：相对路径锚到 cwd，canonicalize 消符号链接与
+/// 分隔符风格。explorer /select 不认正斜杠（手输工作区路径会保留 `/`），
+/// 也不认 `\\?\` 前缀（canonicalize 的 Windows 返回形态）——不规范化就
+/// 静默打开默认目录（文档）。规范失败（断链等）回退绝对化原路径。
+pub(crate) fn normalize_reveal_path(path: &Path) -> PathBuf {
+    let cand = if path.is_absolute() {
+        path.to_path_buf()
     } else {
-        let mut c = std::process::Command::new("open");
-        c.arg("-R").arg(path);
-        c
+        std::env::current_dir().unwrap_or_default().join(path)
+    };
+    match std::fs::canonicalize(&cand) {
+        Ok(p) => {
+            #[cfg(target_os = "windows")]
+            let p = {
+                let s = p.as_os_str().to_string_lossy().into_owned();
+                PathBuf::from(s.strip_prefix(r"\\?\").unwrap_or(&s))
+            };
+            p
+        }
+        Err(_) => cand,
     }
+}
+
+/// 在系统文件管理器中定位条目：macOS `/usr/bin/open -R`（Finder 反显），
+/// Windows `explorer /select,"路径"`，Linux 无 reveal 语义退化为 xdg-open 父目录。
+pub(crate) fn build_reveal_command(path: &Path) -> std::process::Command {
+    let target = normalize_reveal_path(path);
+    #[cfg(target_os = "windows")]
+    let cmd = {
+        use std::os::windows::process::CommandExt;
+        let mut c = std::process::Command::new("explorer.exe");
+        // `/select,` 与路径必须同 token、且只引路径段：整 arg 被引号包裹时
+        // explorer 解析失败，静默打开默认目录（文档）。raw_arg 原样落命令行。
+        c.raw_arg(format!("/select,\"{}\"", target.display()));
+        c
+    };
+    #[cfg(not(target_os = "windows"))]
+    let cmd = {
+        if cfg!(target_os = "macos") {
+            // 绝对路径：GUI 启动（Dock/finder）环境 PATH 可能缩水，裸 `open` 会 NotFound
+            let mut c = std::process::Command::new("/usr/bin/open");
+            c.arg("-R").arg(target);
+            c
+        } else {
+            let mut c = std::process::Command::new("xdg-open");
+            c.arg(target.parent().unwrap_or(&target));
+            c
+        }
+    };
+    cmd
 }

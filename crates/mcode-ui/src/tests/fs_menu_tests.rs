@@ -317,22 +317,49 @@ async fn case29_enter_workspace_updates_recents_and_harness(cx: &mut TestAppCont
 
 #[test]
 fn case35_reveal_command_shape_and_menu_consistency() {
-    use crate::views::context_menu::build_reveal_command;
-    // macOS 分支：open -R <path>
-    let cmd = build_reveal_command(std::path::Path::new("/tmp/x/f.txt"));
-    let mut dbg = format!("{:?}", cmd);
-    assert!(dbg.contains(r#""open""#), "macOS 应为 open: {dbg}");
+    use crate::views::context_menu::{build_reveal_command, normalize_reveal_path};
+    use std::path::Path;
+    // macOS 分支：/usr/bin/open -R <path>（绝对二进制，GUI 环境 PATH 缩水兜底）
+    let cmd = build_reveal_command(Path::new("/tmp/x/f.txt"));
+    let dbg = format!("{cmd:?}");
+    assert!(
+        dbg.contains("/usr/bin/open"),
+        "macOS 应为绝对路径 open: {dbg}"
+    );
     assert!(dbg.contains("-R"), "应有 -R 反显参数: {dbg}");
-    assert!(dbg.contains("f.txt"));
-    let _ = &mut dbg;
-    // 目录与文件同样可用（open -R 对两者均反显其所在父目录并选中）
-    let _ = build_reveal_command(std::path::Path::new("/tmp/x"));
+    // 不存在的路径回退为 cwd 锚定的绝对路径（不再静默失败给相对路径）
+    let dbg = format!("{:?}", build_reveal_command(Path::new("rel/f.txt")));
+    assert!(dbg.contains("rel/f.txt"), "保留原始相对分量: {dbg}");
+
+    // 规范化：存在的路径 → 绝对（canonicalize，macOS 上 /tmp → /private/tmp 合法）
+    let dir = std::env::temp_dir().join("mcode_reveal_test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let norm = normalize_reveal_path(&dir);
+    assert!(norm.is_absolute(), "存在路径应绝对化: {norm:?}");
+    assert!(norm.ends_with("mcode_reveal_test"), "末段保留: {norm:?}");
+    // 相对不存在路径 → cwd 锚定绝对路径
+    let norm = normalize_reveal_path(Path::new("no/such/dir"));
+    assert!(norm.is_absolute(), "回退仍应绝对: {norm:?}");
+    let _ = std::fs::remove_dir_all(&dir);
     // CtxAction::Reveal 在 run_context_action 的 match 中（编译级确认已覆盖）
     let acts = [crate::views::context_menu::CtxAction::Reveal];
     assert!(matches!(
         acts[0],
         crate::views::context_menu::CtxAction::Reveal
     ));
+}
+
+#[cfg(windows)]
+#[test]
+fn reveal_windows_select_shape() {
+    use crate::views::context_menu::build_reveal_command;
+    let cmd = build_reveal_command(std::path::Path::new(r"C:\dir with space\f.txt"));
+    let dbg = format!("{cmd:?}");
+    // raw_arg 原样落命令行：/select, 与路径同 token、只引路径段
+    assert!(
+        dbg.contains(r#"/select,"C:\dir with space\f.txt""#),
+        "{dbg}"
+    );
 }
 
 // ---------- 会话右键菜单（用例 36-39）----------
