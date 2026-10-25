@@ -56,3 +56,7 @@ mcode-core = { path = "crates/mcode-core" }
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Windows IME 组词修复：vendored gpui 见 third_party/gpui/MCODE-PATCHES.md
+[patch.crates-io]
+gpui = { path = "third_party/gpui" }
